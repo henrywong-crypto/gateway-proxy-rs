@@ -154,3 +154,15 @@ pub async fn clear_requests(pool: &SqlitePool, session_id: &str) -> Result<(), s
         .await?;
     Ok(())
 }
+
+pub async fn delete_session(pool: &SqlitePool, session_id: &str) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM requests WHERE session_id = ?")
+        .bind(session_id)
+        .execute(pool)
+        .await?;
+    sqlx::query("DELETE FROM sessions WHERE id = ?")
+        .bind(session_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}

@@ -4,7 +4,7 @@ mod pages;
 mod proxy;
 mod truncate;
 
-use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer};
+use actix_web::{middleware, web, App, HttpRequest, HttpResponse, HttpServer};
 use clap::Parser;
 use sqlx::SqlitePool;
 
@@ -20,14 +20,24 @@ struct Args {
 
 // --- Route handlers ---
 
-async fn home_page(pool: web::Data<SqlitePool>) -> HttpResponse {
+async fn home_page() -> HttpResponse {
+    let html = pages::home::render_home();
+    HttpResponse::Ok().content_type("text/html").body(html)
+}
+
+async fn sessions_index(pool: web::Data<SqlitePool>) -> HttpResponse {
     match db::list_sessions(pool.get_ref()).await {
         Ok(sessions) => {
-            let html = pages::home::render_home(&sessions);
+            let html = pages::sessions::render_sessions_index(&sessions);
             HttpResponse::Ok().content_type("text/html").body(html)
         }
         Err(e) => HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     }
+}
+
+async fn new_session() -> HttpResponse {
+    let html = pages::sessions::render_new_session();
+    HttpResponse::Ok().content_type("text/html").body(html)
 }
 
 async fn create_session(
@@ -44,17 +54,33 @@ async fn create_session(
     let id = generate_session_id();
     match db::create_session(pool.get_ref(), &id, &name, &target_url).await {
         Ok(()) => HttpResponse::SeeOther()
-            .insert_header(("Location", format!("/__proxy__/s/{}", id)))
+            .insert_header(("Location", format!("/_dashboard/sessions/{}", id)))
             .finish(),
         Err(e) => HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     }
 }
 
-async fn session_dashboard(
+async fn session_show(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<String>,
+    args: web::Data<Args>,
+) -> HttpResponse {
+    let session_id = path.into_inner();
+
+    let session = match db::get_session(pool.get_ref(), &session_id).await {
+        Ok(Some(s)) => s,
+        Ok(None) => return HttpResponse::NotFound().body("Session not found"),
+        Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
+    };
+
+    let html = pages::session_show::render_session_show(&session, args.port);
+    HttpResponse::Ok().content_type("text/html").body(html)
+}
+
+async fn requests_index(
     pool: web::Data<SqlitePool>,
     path: web::Path<String>,
     query: web::Query<std::collections::HashMap<String, String>>,
-    args: web::Data<Args>,
 ) -> HttpResponse {
     let session_id = path.into_inner();
     let auto_refresh = query.get("refresh").map(|v| v.as_str()) == Some("on");
@@ -70,20 +96,21 @@ async fn session_dashboard(
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
 
-    let html = pages::dashboard::render_dashboard(&session, &requests, args.port, auto_refresh);
+    let html = pages::requests::render_requests_index(&session, &requests, auto_refresh);
     HttpResponse::Ok().content_type("text/html").body(html)
 }
 
 async fn request_detail(
     pool: web::Data<SqlitePool>,
     path: web::Path<(String, i64)>,
-    query: web::Query<std::collections::HashMap<String, String>>,
 ) -> HttpResponse {
-    let (_session_id, req_id) = path.into_inner();
-    let tab = query
-        .get("tab")
-        .cloned()
-        .unwrap_or_else(|| "messages".to_string());
+    let (session_id, req_id) = path.into_inner();
+
+    let session = match db::get_session(pool.get_ref(), &session_id).await {
+        Ok(Some(s)) => s,
+        Ok(None) => return HttpResponse::NotFound().body("Session not found"),
+        Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
+    };
 
     let request = match db::get_request(pool.get_ref(), req_id).await {
         Ok(Some(r)) => r,
@@ -91,23 +118,30 @@ async fn request_detail(
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
 
-    // If messages tab requested but no messages, fall back to first available
-    let effective_tab = if tab == "messages" && request.messages_json.is_none() {
-        if request.system_json.is_some() {
-            "system"
-        } else if request.tools_json.is_some() {
-            "tools"
-        } else if request.params_json.is_some() {
-            "params"
-        } else {
-            "full_json"
-        }
-        .to_string()
-    } else {
-        tab
+    let html = pages::detail::render_detail_overview(&request, &session);
+    HttpResponse::Ok().content_type("text/html").body(html)
+}
+
+async fn request_detail_page(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<(String, i64, String)>,
+    query: web::Query<std::collections::HashMap<String, String>>,
+) -> HttpResponse {
+    let (session_id, req_id, page) = path.into_inner();
+
+    let session = match db::get_session(pool.get_ref(), &session_id).await {
+        Ok(Some(s)) => s,
+        Ok(None) => return HttpResponse::NotFound().body("Session not found"),
+        Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
 
-    let html = pages::detail::render_detail(&request, &effective_tab, &query);
+    let request = match db::get_request(pool.get_ref(), req_id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => return HttpResponse::NotFound().body("Request not found"),
+        Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
+    };
+
+    let html = pages::detail::render_detail_page(&request, &session, &page, &query);
     HttpResponse::Ok().content_type("text/html").body(html)
 }
 
@@ -118,7 +152,18 @@ async fn clear_session_requests(
     let session_id = path.into_inner();
     let _ = db::clear_requests(pool.get_ref(), &session_id).await;
     HttpResponse::SeeOther()
-        .insert_header(("Location", format!("/__proxy__/s/{}", session_id)))
+        .insert_header(("Location", format!("/_dashboard/sessions/{}/requests", session_id)))
+        .finish()
+}
+
+async fn delete_session(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<String>,
+) -> HttpResponse {
+    let session_id = path.into_inner();
+    let _ = db::delete_session(pool.get_ref(), &session_id).await;
+    HttpResponse::SeeOther()
+        .insert_header(("Location", "/_dashboard/sessions"))
         .finish()
 }
 
@@ -157,7 +202,7 @@ async fn main() -> std::io::Result<()> {
         port
     );
     println!(
-        "Dashboard at http://localhost:{}/__proxy__/",
+        "Dashboard at http://localhost:{}/_dashboard/",
         port
     );
 
@@ -167,15 +212,21 @@ async fn main() -> std::io::Result<()> {
 
     HttpServer::new(move || {
         App::new()
+            .wrap(middleware::NormalizePath::trim())
             .app_data(pool_data.clone())
             .app_data(client_data.clone())
             .app_data(args_data.clone())
-            .route("/__proxy__/", web::get().to(home_page))
-            .route("/__proxy__/sessions", web::post().to(create_session))
-            .route("/__proxy__/s/{id}", web::get().to(session_dashboard))
-            .route("/__proxy__/s/{id}/r/{req_id}", web::get().to(request_detail))
-            .route("/__proxy__/s/{id}/clear", web::post().to(clear_session_requests))
-            .route("/s/{session_id}/{tail:.*}", web::to(proxy_catch_all))
+            .route("/_dashboard", web::get().to(home_page))
+            .route("/_dashboard/sessions", web::get().to(sessions_index))
+            .route("/_dashboard/sessions/new", web::get().to(new_session))
+            .route("/_dashboard/sessions/new", web::post().to(create_session))
+            .route("/_dashboard/sessions/{id}", web::get().to(session_show))
+            .route("/_dashboard/sessions/{id}/requests", web::get().to(requests_index))
+            .route("/_dashboard/sessions/{id}/requests/{req_id}", web::get().to(request_detail))
+            .route("/_dashboard/sessions/{id}/requests/{req_id}/{page}", web::get().to(request_detail_page))
+            .route("/_dashboard/sessions/{id}/clear", web::post().to(clear_session_requests))
+            .route("/_dashboard/sessions/{id}/delete", web::post().to(delete_session))
+            .route("/_proxy/{session_id}/{tail:.*}", web::to(proxy_catch_all))
     })
     .bind(("0.0.0.0", port))?
     .run()
