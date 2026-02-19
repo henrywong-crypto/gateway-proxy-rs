@@ -5,6 +5,7 @@ pub struct Session {
     pub id: String,
     pub name: String,
     pub target_url: String,
+    pub tls_verify_disabled: bool,
     pub created_at: Option<String>,
 }
 
@@ -36,6 +37,7 @@ pub struct SessionWithCount {
     pub id: String,
     pub name: String,
     pub target_url: String,
+    pub tls_verify_disabled: bool,
     pub created_at: Option<String>,
     pub request_count: i64,
 }

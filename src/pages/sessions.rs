@@ -1,7 +1,7 @@
 use leptos::either::Either;
 use leptos::prelude::*;
 
-use crate::models::SessionWithCount;
+use crate::models::{Session, SessionWithCount};
 use crate::pages::page_layout;
 
 pub fn render_sessions_index(sessions: &[SessionWithCount]) -> String {
@@ -87,6 +87,10 @@ pub fn render_new_session() -> String {
                     <td><input type="text" name="target_url" required placeholder="https://api.example.com" size="40"/></td>
                 </tr>
                 <tr>
+                    <td><label>"Disable TLS Verify"</label></td>
+                    <td><input type="checkbox" name="tls_verify_disabled" value="1"/></td>
+                </tr>
+                <tr>
                     <td></td>
                     <td><input type="submit" value="Create"/></td>
                 </tr>
@@ -94,4 +98,64 @@ pub fn render_new_session() -> String {
         </form>
     };
     page_layout("Gateway Proxy - New Session", body.to_html())
+}
+
+pub fn render_edit_session(session: &Session, port: u16) -> String {
+    let session = session.clone();
+    let session_name = session.name.clone();
+    let edit_action = format!("/_dashboard/sessions/{}/edit", session.id);
+    let proxy_url = format!("http://localhost:{}/_proxy/{}/", port, session.id);
+    let requests_href = format!("/_dashboard/sessions/{}/requests", session.id);
+    let back_href = format!("/_dashboard/sessions/{}", session.id);
+    let tls_disabled = session.tls_verify_disabled;
+
+    let body = view! {
+        <h1>
+            <a href="/_dashboard">"Home"</a>
+            " / "
+            <a href="/_dashboard/sessions">"Sessions"</a>
+            " / "
+            <a href={back_href.clone()}>{format!("Session {}", session_name)}</a>
+            " / "
+            "Edit"
+        </h1>
+        <h2>"Navigation"</h2>
+        <table>
+            <tr><td><a href={back_href}>"Back"</a></td></tr>
+        </table>
+        <h2>"Info"</h2>
+        <table>
+            <tr>
+                <td>"Proxy URL"</td>
+                <td>{proxy_url}</td>
+            </tr>
+        </table>
+        <h2>"Edit Session"</h2>
+        <form method="POST" action={edit_action}>
+            <table>
+                <tr>
+                    <td><label>"Name"</label></td>
+                    <td><input type="text" name="name" required value={session.name}/></td>
+                </tr>
+                <tr>
+                    <td><label>"Target URL"</label></td>
+                    <td><input type="text" name="target_url" required value={session.target_url} size="40"/></td>
+                </tr>
+                <tr>
+                    <td><label>"Disable TLS Verify"</label></td>
+                    <td><input type="checkbox" name="tls_verify_disabled" value="1" checked={tls_disabled}/></td>
+                </tr>
+                <tr>
+                    <td></td>
+                    <td><input type="submit" value="Save"/></td>
+                </tr>
+            </table>
+        </form>
+        <h2>"Requests"</h2>
+        <table>
+            <tr><td><a href={requests_href}>"Requests"</a></td></tr>
+        </table>
+    };
+
+    page_layout(&format!("Gateway Proxy - Edit Session {}", session_name), body.to_html())
 }

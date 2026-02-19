@@ -46,13 +46,14 @@ async fn create_session(
 ) -> HttpResponse {
     let name = form.get("name").cloned().unwrap_or_default();
     let target_url = form.get("target_url").cloned().unwrap_or_default();
+    let tls_verify_disabled = form.get("tls_verify_disabled").map(|v| v == "1").unwrap_or(false);
 
     if name.is_empty() || target_url.is_empty() {
         return HttpResponse::BadRequest().body("Name and target_url are required");
     }
 
     let id = generate_session_id();
-    match db::create_session(pool.get_ref(), &id, &name, &target_url).await {
+    match db::create_session(pool.get_ref(), &id, &name, &target_url, tls_verify_disabled).await {
         Ok(()) => HttpResponse::SeeOther()
             .insert_header(("Location", format!("/_dashboard/sessions/{}", id)))
             .finish(),
@@ -167,6 +168,45 @@ async fn delete_session(
         .finish()
 }
 
+async fn edit_session(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<String>,
+    args: web::Data<Args>,
+) -> HttpResponse {
+    let session_id = path.into_inner();
+
+    let session = match db::get_session(pool.get_ref(), &session_id).await {
+        Ok(Some(s)) => s,
+        Ok(None) => return HttpResponse::NotFound().body("Session not found"),
+        Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
+    };
+
+    let html = pages::sessions::render_edit_session(&session, args.port);
+    HttpResponse::Ok().content_type("text/html").body(html)
+}
+
+async fn update_session(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<String>,
+    form: web::Form<std::collections::HashMap<String, String>>,
+) -> HttpResponse {
+    let session_id = path.into_inner();
+    let name = form.get("name").cloned().unwrap_or_default();
+    let target_url = form.get("target_url").cloned().unwrap_or_default();
+    let tls_verify_disabled = form.get("tls_verify_disabled").map(|v| v == "1").unwrap_or(false);
+
+    if name.is_empty() || target_url.is_empty() {
+        return HttpResponse::BadRequest().body("Name and target_url are required");
+    }
+
+    match db::update_session(pool.get_ref(), &session_id, &name, &target_url, tls_verify_disabled).await {
+        Ok(()) => HttpResponse::SeeOther()
+            .insert_header(("Location", format!("/_dashboard/sessions/{}", session_id)))
+            .finish(),
+        Err(e) => HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
+    }
+}
+
 async fn proxy_catch_all(
     req: HttpRequest,
     body: web::Bytes,
@@ -221,6 +261,8 @@ async fn main() -> std::io::Result<()> {
             .route("/_dashboard/sessions/new", web::get().to(new_session))
             .route("/_dashboard/sessions/new", web::post().to(create_session))
             .route("/_dashboard/sessions/{id}", web::get().to(session_show))
+            .route("/_dashboard/sessions/{id}/edit", web::get().to(edit_session))
+            .route("/_dashboard/sessions/{id}/edit", web::post().to(update_session))
             .route("/_dashboard/sessions/{id}/requests", web::get().to(requests_index))
             .route("/_dashboard/sessions/{id}/requests/{req_id}", web::get().to(request_detail))
             .route("/_dashboard/sessions/{id}/requests/{req_id}/{page}", web::get().to(request_detail_page))

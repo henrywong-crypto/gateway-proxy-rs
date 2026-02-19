@@ -8,6 +8,7 @@ pub fn render_session_show(session: &Session, port: u16) -> String {
     let session_name = session.name.clone();
     let proxy_url = format!("http://localhost:{}/_proxy/{}/", port, session.id);
     let requests_href = format!("/_dashboard/sessions/{}/requests", session.id);
+    let edit_href = format!("/_dashboard/sessions/{}/edit", session.id);
 
     let body = view! {
         <h1>
@@ -19,6 +20,7 @@ pub fn render_session_show(session: &Session, port: u16) -> String {
         </h1>
         <h2>"Navigation"</h2>
         <table>
+            <tr><td><a href={edit_href}>"Edit Session"</a></td></tr>
             <tr><td><a href="/_dashboard/sessions">"Back"</a></td></tr>
         </table>
         <h2>"Info"</h2>

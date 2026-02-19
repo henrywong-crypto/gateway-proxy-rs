@@ -120,8 +120,20 @@ pub async fn proxy_handler(
         }
     }
 
-    let resp = client
-        .get_ref()
+    // Build a separate client if TLS verification is disabled for this session
+    let insecure_client;
+    let effective_client: &reqwest::Client = if session.tls_verify_disabled {
+        insecure_client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .danger_accept_invalid_certs(true)
+            .build()
+            .unwrap_or_else(|_| client.get_ref().clone());
+        &insecure_client
+    } else {
+        client.get_ref()
+    };
+
+    let resp = effective_client
         .request(
             reqwest::Method::from_bytes(method.as_bytes()).unwrap_or(reqwest::Method::GET),
             &target_url,

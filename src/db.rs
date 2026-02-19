@@ -20,12 +20,20 @@ pub async fn init_pool(db_path: &str) -> Result<SqlitePool, sqlx::Error> {
         }
     }
 
+    // Run migration 003: add tls_verify_disabled column
+    for stmt in include_str!("../migrations/003_add_tls_verify_disabled.sql").split(';') {
+        let stmt = stmt.trim();
+        if !stmt.is_empty() {
+            let _ = sqlx::query(stmt).execute(&pool).await;
+        }
+    }
+
     Ok(pool)
 }
 
 pub async fn list_sessions(pool: &SqlitePool) -> Result<Vec<SessionWithCount>, sqlx::Error> {
     sqlx::query_as::<_, SessionWithCount>(
-        "SELECT s.id, s.name, s.target_url, s.created_at, \
+        "SELECT s.id, s.name, s.target_url, s.tls_verify_disabled, s.created_at, \
          COALESCE((SELECT COUNT(*) FROM requests r WHERE r.session_id = s.id), 0) as request_count \
          FROM sessions s ORDER BY s.created_at DESC",
     )
@@ -34,7 +42,7 @@ pub async fn list_sessions(pool: &SqlitePool) -> Result<Vec<SessionWithCount>, s
 }
 
 pub async fn get_session(pool: &SqlitePool, id: &str) -> Result<Option<Session>, sqlx::Error> {
-    sqlx::query_as::<_, Session>("SELECT id, name, target_url, created_at FROM sessions WHERE id = ?")
+    sqlx::query_as::<_, Session>("SELECT id, name, target_url, tls_verify_disabled, created_at FROM sessions WHERE id = ?")
         .bind(id)
         .fetch_optional(pool)
         .await
@@ -45,11 +53,13 @@ pub async fn create_session(
     id: &str,
     name: &str,
     target_url: &str,
+    tls_verify_disabled: bool,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("INSERT INTO sessions (id, name, target_url) VALUES (?, ?, ?)")
+    sqlx::query("INSERT INTO sessions (id, name, target_url, tls_verify_disabled) VALUES (?, ?, ?, ?)")
         .bind(id)
         .bind(name)
         .bind(target_url)
+        .bind(tls_verify_disabled)
         .execute(pool)
         .await?;
     Ok(())
@@ -162,6 +172,23 @@ pub async fn delete_session(pool: &SqlitePool, session_id: &str) -> Result<(), s
         .await?;
     sqlx::query("DELETE FROM sessions WHERE id = ?")
         .bind(session_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn update_session(
+    pool: &SqlitePool,
+    id: &str,
+    name: &str,
+    target_url: &str,
+    tls_verify_disabled: bool,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE sessions SET name = ?, target_url = ?, tls_verify_disabled = ? WHERE id = ?")
+        .bind(name)
+        .bind(target_url)
+        .bind(tls_verify_disabled)
+        .bind(id)
         .execute(pool)
         .await?;
     Ok(())
