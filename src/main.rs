@@ -251,8 +251,10 @@ async fn main() -> std::io::Result<()> {
     let client_data = web::Data::new(client);
 
     HttpServer::new(move || {
+        let payload_cfg = web::PayloadConfig::new(100 * 1024 * 1024); // 100 MB
         App::new()
             .wrap(middleware::NormalizePath::trim())
+            .app_data(payload_cfg)
             .app_data(pool_data.clone())
             .app_data(client_data.clone())
             .app_data(args_data.clone())
