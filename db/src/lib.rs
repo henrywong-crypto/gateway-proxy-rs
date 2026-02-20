@@ -1,19 +1,19 @@
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 
-use crate::models::{ProxyRequest, Session, SessionWithCount};
+use common::models::{ProxyRequest, Session, SessionWithCount};
 
-pub async fn init_pool(db_path: &str) -> Result<SqlitePool, sqlx::Error> {
+pub async fn init_pool(db_path: &str) -> anyhow::Result<SqlitePool> {
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
         .connect(&format!("sqlite:{}?mode=rwc", db_path))
         .await?;
 
-    sqlx::query(include_str!("../migrations/001_init.sql"))
+    sqlx::query(include_str!("../../migrations/001_init.sql"))
         .execute(&pool)
         .await?;
 
     // Run migration 002: add response columns (ignore errors if columns already exist)
-    for stmt in include_str!("../migrations/002_add_response.sql").split(';') {
+    for stmt in include_str!("../../migrations/002_add_response.sql").split(';') {
         let stmt = stmt.trim();
         if !stmt.is_empty() {
             let _ = sqlx::query(stmt).execute(&pool).await;
@@ -21,7 +21,7 @@ pub async fn init_pool(db_path: &str) -> Result<SqlitePool, sqlx::Error> {
     }
 
     // Run migration 003: add tls_verify_disabled column
-    for stmt in include_str!("../migrations/003_add_tls_verify_disabled.sql").split(';') {
+    for stmt in include_str!("../../migrations/003_add_tls_verify_disabled.sql").split(';') {
         let stmt = stmt.trim();
         if !stmt.is_empty() {
             let _ = sqlx::query(stmt).execute(&pool).await;
@@ -31,21 +31,21 @@ pub async fn init_pool(db_path: &str) -> Result<SqlitePool, sqlx::Error> {
     Ok(pool)
 }
 
-pub async fn list_sessions(pool: &SqlitePool) -> Result<Vec<SessionWithCount>, sqlx::Error> {
-    sqlx::query_as::<_, SessionWithCount>(
+pub async fn list_sessions(pool: &SqlitePool) -> anyhow::Result<Vec<SessionWithCount>> {
+    Ok(sqlx::query_as::<_, SessionWithCount>(
         "SELECT s.id, s.name, s.target_url, s.tls_verify_disabled, s.created_at, \
          COALESCE((SELECT COUNT(*) FROM requests r WHERE r.session_id = s.id), 0) as request_count \
          FROM sessions s ORDER BY s.created_at DESC",
     )
     .fetch_all(pool)
-    .await
+    .await?)
 }
 
-pub async fn get_session(pool: &SqlitePool, id: &str) -> Result<Option<Session>, sqlx::Error> {
-    sqlx::query_as::<_, Session>("SELECT id, name, target_url, tls_verify_disabled, created_at FROM sessions WHERE id = ?")
+pub async fn get_session(pool: &SqlitePool, id: &str) -> anyhow::Result<Option<Session>> {
+    Ok(sqlx::query_as::<_, Session>("SELECT id, name, target_url, tls_verify_disabled, created_at FROM sessions WHERE id = ?")
         .bind(id)
         .fetch_optional(pool)
-        .await
+        .await?)
 }
 
 pub async fn create_session(
@@ -54,7 +54,7 @@ pub async fn create_session(
     name: &str,
     target_url: &str,
     tls_verify_disabled: bool,
-) -> Result<(), sqlx::Error> {
+) -> anyhow::Result<()> {
     sqlx::query("INSERT INTO sessions (id, name, target_url, tls_verify_disabled) VALUES (?, ?, ?, ?)")
         .bind(id)
         .bind(name)
@@ -68,8 +68,8 @@ pub async fn create_session(
 pub async fn list_requests(
     pool: &SqlitePool,
     session_id: &str,
-) -> Result<Vec<ProxyRequest>, sqlx::Error> {
-    sqlx::query_as::<_, ProxyRequest>(
+) -> anyhow::Result<Vec<ProxyRequest>> {
+    Ok(sqlx::query_as::<_, ProxyRequest>(
         "SELECT id, session_id, method, path, timestamp, headers_json, body_json, \
          truncated_json, model, tools_json, messages_json, system_json, params_json, \
          note, created_at, response_status, response_headers_json, response_body, \
@@ -77,14 +77,14 @@ pub async fn list_requests(
     )
     .bind(session_id)
     .fetch_all(pool)
-    .await
+    .await?)
 }
 
 pub async fn get_request(
     pool: &SqlitePool,
     req_id: i64,
-) -> Result<Option<ProxyRequest>, sqlx::Error> {
-    sqlx::query_as::<_, ProxyRequest>(
+) -> anyhow::Result<Option<ProxyRequest>> {
+    Ok(sqlx::query_as::<_, ProxyRequest>(
         "SELECT id, session_id, method, path, timestamp, headers_json, body_json, \
          truncated_json, model, tools_json, messages_json, system_json, params_json, \
          note, created_at, response_status, response_headers_json, response_body, \
@@ -92,8 +92,8 @@ pub async fn get_request(
     )
     .bind(req_id)
     .fetch_all(pool)
-    .await
-    .map(|mut v| v.pop())
+    .await?
+    .pop())
 }
 
 pub async fn insert_request(
@@ -111,7 +111,7 @@ pub async fn insert_request(
     system_json: Option<&str>,
     params_json: Option<&str>,
     note: Option<&str>,
-) -> Result<i64, sqlx::Error> {
+) -> anyhow::Result<i64> {
     let result = sqlx::query(
         "INSERT INTO requests (session_id, method, path, timestamp, headers_json, body_json, \
          truncated_json, model, tools_json, messages_json, system_json, params_json, note) \
@@ -142,7 +142,7 @@ pub async fn update_request_response(
     response_headers_json: Option<&str>,
     response_body: Option<&str>,
     response_events_json: Option<&str>,
-) -> Result<(), sqlx::Error> {
+) -> anyhow::Result<()> {
     sqlx::query(
         "UPDATE requests SET response_status = ?, response_headers_json = ?, \
          response_body = ?, response_events_json = ? WHERE id = ?",
@@ -157,7 +157,7 @@ pub async fn update_request_response(
     Ok(())
 }
 
-pub async fn clear_requests(pool: &SqlitePool, session_id: &str) -> Result<(), sqlx::Error> {
+pub async fn clear_requests(pool: &SqlitePool, session_id: &str) -> anyhow::Result<()> {
     sqlx::query("DELETE FROM requests WHERE session_id = ?")
         .bind(session_id)
         .execute(pool)
@@ -165,7 +165,7 @@ pub async fn clear_requests(pool: &SqlitePool, session_id: &str) -> Result<(), s
     Ok(())
 }
 
-pub async fn delete_session(pool: &SqlitePool, session_id: &str) -> Result<(), sqlx::Error> {
+pub async fn delete_session(pool: &SqlitePool, session_id: &str) -> anyhow::Result<()> {
     sqlx::query("DELETE FROM requests WHERE session_id = ?")
         .bind(session_id)
         .execute(pool)
@@ -183,7 +183,7 @@ pub async fn update_session(
     name: &str,
     target_url: &str,
     tls_verify_disabled: bool,
-) -> Result<(), sqlx::Error> {
+) -> anyhow::Result<()> {
     sqlx::query("UPDATE sessions SET name = ?, target_url = ?, tls_verify_disabled = ? WHERE id = ?")
         .bind(name)
         .bind(target_url)

@@ -1,8 +1,9 @@
+mod sse;
+
 use actix_web::{web, HttpRequest, HttpResponse};
 use sqlx::SqlitePool;
 
-use crate::db;
-use crate::truncate::truncate_strings;
+use common::truncate::truncate_strings;
 
 pub async fn proxy_handler(
     req: HttpRequest,
@@ -11,7 +12,10 @@ pub async fn proxy_handler(
     client: web::Data<reqwest::Client>,
 ) -> HttpResponse {
     let full_path = req.match_info().get("tail").unwrap_or("");
-    let session_id = req.match_info().get("session_id").unwrap_or("");
+    let session_id = match req.match_info().get("session_id") {
+        Some(id) => id,
+        None => return HttpResponse::BadRequest().body("Missing session_id"),
+    };
 
     // Look up session
     let session = match db::get_session(pool.get_ref(), session_id).await {
@@ -40,9 +44,20 @@ pub async fn proxy_handler(
     let headers_map: std::collections::HashMap<String, String> = req
         .headers()
         .iter()
-        .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+        .filter_map(|(k, v)| {
+            match v.to_str() {
+                Ok(s) => Some((k.to_string(), s.to_string())),
+                Err(_) => None,
+            }
+        })
         .collect();
-    let headers_json = serde_json::to_string_pretty(&headers_map).ok();
+    let headers_json = match serde_json::to_string_pretty(&headers_map) {
+        Ok(s) => Some(s),
+        Err(e) => {
+            eprintln!("Failed to serialize request headers: {}", e);
+            None
+        }
+    };
 
     let mut body_json: Option<String> = None;
     let mut truncated_json: Option<String> = None;
@@ -56,39 +71,73 @@ pub async fn proxy_handler(
     if body.is_empty() {
         note = Some("no body".to_string());
     } else if let Ok(data) = serde_json::from_slice::<serde_json::Value>(&body) {
-        body_json = serde_json::to_string_pretty(&data).ok();
+        body_json = match serde_json::to_string_pretty(&data) {
+            Ok(s) => Some(s),
+            Err(e) => {
+                eprintln!("Failed to serialize body JSON: {}", e);
+                None
+            }
+        };
         let truncated = truncate_strings(&data, 100);
-        truncated_json = serde_json::to_string_pretty(&truncated).ok();
+        truncated_json = match serde_json::to_string_pretty(&truncated) {
+            Ok(s) => Some(s),
+            Err(e) => {
+                eprintln!("Failed to serialize truncated JSON: {}", e);
+                None
+            }
+        };
         model = data.get("model").and_then(|v| v.as_str()).map(|s| s.to_string());
 
         if let Some(tools) = data.get("tools").filter(|v| v.is_array()) {
-            tools_json = serde_json::to_string(tools).ok();
+            tools_json = match serde_json::to_string(tools) {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    eprintln!("Failed to serialize tools: {}", e);
+                    None
+                }
+            };
         }
         if let Some(messages) = data.get("messages").filter(|v| v.is_array()) {
-            messages_json = serde_json::to_string(messages).ok();
+            messages_json = match serde_json::to_string(messages) {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    eprintln!("Failed to serialize messages: {}", e);
+                    None
+                }
+            };
         }
         if let Some(system) = data.get("system") {
-            system_json = serde_json::to_string_pretty(system).ok();
+            system_json = match serde_json::to_string_pretty(system) {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    eprintln!("Failed to serialize system: {}", e);
+                    None
+                }
+            };
         }
 
-        let other: serde_json::Map<String, serde_json::Value> = data
-            .as_object()
-            .map(|obj| {
-                obj.iter()
-                    .filter(|(k, _)| !matches!(k.as_str(), "tools" | "messages" | "system"))
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let other: serde_json::Map<String, serde_json::Value> = match data.as_object() {
+            Some(obj) => obj
+                .iter()
+                .filter(|(k, _)| !matches!(k.as_str(), "tools" | "messages" | "system"))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            None => serde_json::Map::new(),
+        };
         if !other.is_empty() {
-            params_json =
-                serde_json::to_string_pretty(&serde_json::Value::Object(other)).ok();
+            params_json = match serde_json::to_string_pretty(&serde_json::Value::Object(other)) {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    eprintln!("Failed to serialize params: {}", e);
+                    None
+                }
+            };
         }
     } else {
         note = Some(format!("non-JSON body, {} bytes", body.len()));
     }
 
-    let request_id = db::insert_request(
+    let request_id = match db::insert_request(
         pool.get_ref(),
         session_id,
         &method,
@@ -105,7 +154,13 @@ pub async fn proxy_handler(
         note.as_deref(),
     )
     .await
-    .ok();
+    {
+        Ok(id) => Some(id),
+        Err(e) => {
+            eprintln!("Failed to insert request: {}", e);
+            None
+        }
+    };
 
     // Forward the request
     let mut forward_headers = reqwest::header::HeaderMap::new();
@@ -123,21 +178,33 @@ pub async fn proxy_handler(
     // Build a separate client if TLS verification is disabled for this session
     let insecure_client;
     let effective_client: &reqwest::Client = if session.tls_verify_disabled {
-        insecure_client = reqwest::Client::builder()
+        match reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .danger_accept_invalid_certs(true)
             .build()
-            .unwrap_or_else(|_| client.get_ref().clone());
-        &insecure_client
+        {
+            Ok(c) => {
+                insecure_client = c;
+                &insecure_client
+            }
+            Err(e) => {
+                return HttpResponse::InternalServerError()
+                    .body(format!("Failed to build TLS-insecure client: {}", e));
+            }
+        }
     } else {
         client.get_ref()
     };
 
+    let parsed_method = match reqwest::Method::from_bytes(method.as_bytes()) {
+        Ok(m) => m,
+        Err(e) => {
+            return HttpResponse::BadRequest().body(format!("Invalid HTTP method: {}", e));
+        }
+    };
+
     let resp = effective_client
-        .request(
-            reqwest::Method::from_bytes(method.as_bytes()).unwrap_or(reqwest::Method::GET),
-            &target_url,
-        )
+        .request(parsed_method, &target_url)
         .headers(forward_headers)
         .body(body.to_vec())
         .send()
@@ -151,22 +218,37 @@ pub async fn proxy_handler(
             let resp_headers_map: std::collections::HashMap<String, String> = upstream
                 .headers()
                 .iter()
-                .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+                .filter_map(|(k, v)| match v.to_str() {
+                    Ok(s) => Some((k.to_string(), s.to_string())),
+                    Err(_) => None,
+                })
                 .collect();
-            let resp_headers_json = serde_json::to_string_pretty(&resp_headers_map).ok();
+            let resp_headers_json = match serde_json::to_string_pretty(&resp_headers_map) {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    eprintln!("Failed to serialize response headers: {}", e);
+                    None
+                }
+            };
 
             // Check if SSE
             let content_type = upstream
                 .headers()
                 .get("content-type")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("")
-                .to_string();
-            let is_sse = content_type.contains("text/event-stream");
+                .and_then(|v| v.to_str().ok());
+            let is_sse = match content_type {
+                Some(ct) => ct.contains("text/event-stream"),
+                None => false,
+            };
 
             let mut builder = HttpResponse::build(
-                actix_web::http::StatusCode::from_u16(status)
-                    .unwrap_or(actix_web::http::StatusCode::INTERNAL_SERVER_ERROR),
+                match actix_web::http::StatusCode::from_u16(status) {
+                    Ok(s) => s,
+                    Err(_) => {
+                        return HttpResponse::BadGateway()
+                            .body(format!("Invalid status code from upstream: {}", status));
+                    }
+                },
             );
             for (key, value) in upstream.headers() {
                 let k = key.as_str().to_lowercase();
@@ -181,19 +263,31 @@ pub async fn proxy_handler(
                     }
                 }
             }
-            let response_body = upstream.bytes().await.unwrap_or_default();
+            let response_body = match upstream.bytes().await {
+                Ok(b) => b,
+                Err(e) => {
+                    return HttpResponse::BadGateway()
+                        .body(format!("Failed to read upstream response body: {}", e));
+                }
+            };
 
             // Store response data
             if let Some(req_id) = request_id {
                 let body_str = String::from_utf8_lossy(&response_body);
                 let (resp_body, resp_events) = if is_sse {
-                    let events = parse_sse_events(&body_str);
-                    let events_json = serde_json::to_string(&events).ok();
+                    let events = sse::parse_sse_events(&body_str);
+                    let events_json = match serde_json::to_string(&events) {
+                        Ok(s) => Some(s),
+                        Err(e) => {
+                            eprintln!("Failed to serialize SSE events: {}", e);
+                            None
+                        }
+                    };
                     (Some(body_str.to_string()), events_json)
                 } else {
                     (Some(body_str.to_string()), None)
                 };
-                let _ = db::update_request_response(
+                if let Err(e) = db::update_request_response(
                     pool.get_ref(),
                     req_id,
                     status as i64,
@@ -201,60 +295,14 @@ pub async fn proxy_handler(
                     resp_body.as_deref(),
                     resp_events.as_deref(),
                 )
-                .await;
+                .await
+                {
+                    eprintln!("Failed to update request response: {}", e);
+                }
             }
 
             builder.body(response_body.to_vec())
         }
         Err(e) => HttpResponse::BadGateway().body(format!("Upstream error: {}", e)),
     }
-}
-
-fn parse_sse_events(body: &str) -> Vec<serde_json::Value> {
-    let mut events = Vec::new();
-    let mut current_event_type = String::new();
-    let mut current_data = String::new();
-
-    for line in body.lines() {
-        if line.starts_with("event:") {
-            current_event_type = line["event:".len()..].trim().to_string();
-        } else if line.starts_with("data:") {
-            if !current_data.is_empty() {
-                current_data.push('\n');
-            }
-            current_data.push_str(line["data:".len()..].trim());
-        } else if line.trim().is_empty() && !current_data.is_empty() {
-            // Empty line = end of event
-            let data_value = serde_json::from_str::<serde_json::Value>(&current_data)
-                .unwrap_or_else(|_| serde_json::Value::String(current_data.clone()));
-            let mut event = serde_json::Map::new();
-            if !current_event_type.is_empty() {
-                event.insert(
-                    "event".to_string(),
-                    serde_json::Value::String(current_event_type.clone()),
-                );
-            }
-            event.insert("data".to_string(), data_value);
-            events.push(serde_json::Value::Object(event));
-            current_data.clear();
-            current_event_type.clear();
-        }
-    }
-
-    // Handle trailing event without final blank line
-    if !current_data.is_empty() {
-        let data_value = serde_json::from_str::<serde_json::Value>(&current_data)
-            .unwrap_or_else(|_| serde_json::Value::String(current_data.clone()));
-        let mut event = serde_json::Map::new();
-        if !current_event_type.is_empty() {
-            event.insert(
-                "event".to_string(),
-                serde_json::Value::String(current_event_type),
-            );
-        }
-        event.insert("data".to_string(), data_value);
-        events.push(serde_json::Value::Object(event));
-    }
-
-    events
 }

@@ -1,7 +1,7 @@
 use leptos::either::Either;
 use leptos::prelude::*;
 
-use crate::models::{Session, SessionWithCount};
+use common::models::{Session, SessionWithCount};
 use crate::pages::page_layout;
 
 pub fn render_sessions_index(sessions: &[SessionWithCount]) -> String {
@@ -42,7 +42,7 @@ pub fn render_sessions_index(sessions: &[SessionWithCount]) -> String {
                                 <td><a href={href}>{s.name}</a></td>
                                 <td>{s.target_url}</td>
                                 <td>{s.request_count}</td>
-                                <td>{s.created_at.unwrap_or_default()}</td>
+                                <td>{s.created_at.clone().unwrap_or_default()}</td>
                                 <td>
                                     <form method="POST" action={clear_action}>
                                         <button type="submit">"Clear"</button>

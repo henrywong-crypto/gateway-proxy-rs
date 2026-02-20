@@ -50,8 +50,12 @@ const COLLAPSE_THRESHOLD: usize = 200;
 
 pub fn collapsible_block(content: &str, css_class: &str) -> String {
     let escaped = html_escape(content);
-    if content.len() <= COLLAPSE_THRESHOLD && !content.contains('\n') {
-        return format!(r#"<div class="{}">{}</div>"#, css_class, escaped);
+    if content.len() <= COLLAPSE_THRESHOLD {
+        if content.contains('\n') {
+            return format!(r#"<pre class="{}">{}</pre>"#, css_class, escaped);
+        } else {
+            return format!(r#"<div class="{}">{}</div>"#, css_class, escaped);
+        }
     }
     let preview: String = content.chars().take(COLLAPSE_THRESHOLD).collect();
     let preview_escaped = html_escape(&preview);

@@ -1,6 +1,6 @@
 use leptos::prelude::*;
 
-use crate::models::Session;
+use common::models::Session;
 use crate::pages::page_layout;
 
 pub fn render_session_show(session: &Session, port: u16) -> String {
