@@ -34,23 +34,28 @@ pub fn render_messages(json_str: &str, order: &str) -> String {
                 match btype {
                     "text" => {
                         let text = block.get("text").and_then(|t| t.as_str()).unwrap_or("");
+                        let cache_info = cache_control_label(block);
                         html.push_str(&format!(
-                            "<tr><td>{}</td><td>text</td><td>{}</td></tr>",
+                            "<tr><td>{}</td><td>text{}</td><td>{}</td></tr>",
                             role_cell,
+                            cache_info,
                             collapsible_block(text, "")
                         ));
                     }
                     "thinking" => {
                         let text = block.get("thinking").and_then(|t| t.as_str()).unwrap_or("");
+                        let cache_info = cache_control_label(block);
                         html.push_str(&format!(
-                            "<tr><td>{}</td><td>thinking</td><td>{}</td></tr>",
+                            "<tr><td>{}</td><td>thinking{}</td><td>{}</td></tr>",
                             role_cell,
+                            cache_info,
                             collapsible_block(text, "")
                         ));
                     }
                     "tool_use" => {
                         let name = block.get("name").and_then(|n| n.as_str()).unwrap_or("");
                         let id = block.get("id").and_then(|i| i.as_str()).unwrap_or("");
+                        let cache_info = cache_control_label(block);
                         let mut params_html = String::new();
                         if let Some(input) = block.get("input").and_then(|i| i.as_object()) {
                             params_html.push_str("<table><tr><th>Param</th><th>Value</th></tr>");
@@ -69,8 +74,9 @@ pub fn render_messages(json_str: &str, order: &str) -> String {
                             params_html.push_str("</table>");
                         }
                         html.push_str(&format!(
-                            "<tr><td>{}</td><td>tool_use: {} {}</td><td>{}</td></tr>",
+                            "<tr><td>{}</td><td>tool_use{}: {} {}</td><td>{}</td></tr>",
                             role_cell,
+                            cache_info,
                             html_escape(name),
                             html_escape(id),
                             params_html
@@ -81,6 +87,7 @@ pub fn render_messages(json_str: &str, order: &str) -> String {
                             .get("tool_use_id")
                             .and_then(|i| i.as_str())
                             .unwrap_or("");
+                        let cache_info = cache_control_label(block);
                         let result_text = if let Some(s) =
                             block.get("content").and_then(|c| c.as_str())
                         {
@@ -94,8 +101,9 @@ pub fn render_messages(json_str: &str, order: &str) -> String {
                             String::new()
                         };
                         html.push_str(&format!(
-                            "<tr><td>{}</td><td>tool_result {}</td><td>{}</td></tr>",
+                            "<tr><td>{}</td><td>tool_result{} {}</td><td>{}</td></tr>",
                             role_cell,
+                            cache_info,
                             html_escape(tool_use_id),
                             collapsible_block(&result_text, "")
                         ));
@@ -112,4 +120,13 @@ pub fn render_messages(json_str: &str, order: &str) -> String {
     }
     html.push_str("</table>");
     html
+}
+
+fn cache_control_label(block: &serde_json::Value) -> String {
+    block
+        .get("cache_control")
+        .and_then(|c| c.get("type"))
+        .and_then(|t| t.as_str())
+        .map(|t| format!(" (cache: {})", html_escape(t)))
+        .unwrap_or_default()
 }
