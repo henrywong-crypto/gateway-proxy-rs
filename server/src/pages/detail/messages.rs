@@ -41,10 +41,7 @@ pub fn render_messages(json_str: &str, order: &str) -> String {
                         ));
                     }
                     "thinking" => {
-                        let text = block
-                            .get("thinking")
-                            .and_then(|t| t.as_str())
-                            .unwrap_or("");
+                        let text = block.get("thinking").and_then(|t| t.as_str()).unwrap_or("");
                         html.push_str(&format!(
                             "<tr><td>{}</td><td>thinking</td><td>{}</td></tr>",
                             role_cell,
@@ -88,9 +85,7 @@ pub fn render_messages(json_str: &str, order: &str) -> String {
                             block.get("content").and_then(|c| c.as_str())
                         {
                             s.to_string()
-                        } else if let Some(arr) =
-                            block.get("content").and_then(|c| c.as_array())
-                        {
+                        } else if let Some(arr) = block.get("content").and_then(|c| c.as_array()) {
                             arr.iter()
                                 .filter_map(|c| c.get("text").and_then(|t| t.as_str()))
                                 .collect::<Vec<_>>()

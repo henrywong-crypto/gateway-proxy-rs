@@ -1,8 +1,8 @@
 use leptos::either::Either;
 use leptos::prelude::*;
 
-use common::models::{ProxyRequest, Session};
 use crate::pages::page_layout;
+use common::models::{ProxyRequest, Session};
 
 pub fn render_requests_index(
     session: &Session,
@@ -66,7 +66,7 @@ pub fn render_requests_index(
                     {requests.into_iter().map(|r| {
                         let detail_href = format!("/_dashboard/sessions/{}/requests/{}", r.session_id, r.id);
                         let messages_href = format!("/_dashboard/sessions/{}/requests/{}/messages", r.session_id, r.id);
-                        let sse_href = format!("/_dashboard/sessions/{}/requests/{}/sse", r.session_id, r.id);
+                        let sse_href = format!("/_dashboard/sessions/{}/requests/{}/response_sse", r.session_id, r.id);
                         let (msg_count, preview) = get_message_preview(&r);
                         let (block_count, response_summary) = get_response_summary(&r);
                         let model = r.model.clone().unwrap_or_default();
@@ -89,7 +89,10 @@ pub fn render_requests_index(
         }}
     };
 
-    page_layout(&format!("Gateway Proxy - Session {} - Requests", session_name), body.to_html())
+    page_layout(
+        &format!("Gateway Proxy - Session {} - Requests", session_name),
+        body.to_html(),
+    )
 }
 
 fn get_message_preview(r: &ProxyRequest) -> (String, String) {
@@ -130,22 +133,23 @@ fn get_message_preview(r: &ProxyRequest) -> (String, String) {
                     block.get("name").and_then(|n| n.as_str()).unwrap_or("")
                 ),
                 Some("tool_result") => {
-                    let content_preview = if let Some(s) = block.get("content").and_then(|c| c.as_str()) {
-                        s.to_string()
-                    } else if let Some(arr) = block.get("content").and_then(|c| c.as_array()) {
-                        arr.iter()
-                            .filter_map(|b| {
-                                if b.get("type").and_then(|t| t.as_str()) == Some("text") {
-                                    b.get("text").and_then(|t| t.as_str())
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                    } else {
-                        String::new()
-                    };
+                    let content_preview =
+                        if let Some(s) = block.get("content").and_then(|c| c.as_str()) {
+                            s.to_string()
+                        } else if let Some(arr) = block.get("content").and_then(|c| c.as_array()) {
+                            arr.iter()
+                                .filter_map(|b| {
+                                    if b.get("type").and_then(|t| t.as_str()) == Some("text") {
+                                        b.get("text").and_then(|t| t.as_str())
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect::<Vec<_>>()
+                                .join(" ")
+                        } else {
+                            String::new()
+                        };
                     if content_preview.is_empty() {
                         "tool_result".to_string()
                     } else {
@@ -228,7 +232,10 @@ fn get_response_summary(r: &ProxyRequest) -> (String, String) {
                         block_text.entry(index).or_default().push_str(text);
                     }
                     "input_json_delta" => {
-                        let json = delta.get("partial_json").and_then(|v| v.as_str()).unwrap_or("");
+                        let json = delta
+                            .get("partial_json")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
                         block_text.entry(index).or_default().push_str(json);
                     }
                     _ => {}

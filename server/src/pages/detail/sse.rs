@@ -1,5 +1,5 @@
-use ::common::models::ProxyRequest;
 use crate::pages::{collapsible_block, html_escape};
+use ::common::models::ProxyRequest;
 
 pub fn render_response_sse(req: &ProxyRequest) -> String {
     let mut html = String::new();
@@ -11,16 +11,17 @@ pub fn render_response_sse(req: &ProxyRequest) -> String {
             html.push_str("<table><tr><th>#</th><th>Event</th><th>Data</th><th>Raw</th></tr>");
 
             // Track accumulated text/json per content block index
-            let mut block_text: std::collections::HashMap<i64, String> = std::collections::HashMap::new();
-            let mut block_json: std::collections::HashMap<i64, String> = std::collections::HashMap::new();
-            let mut block_names: std::collections::HashMap<i64, String> = std::collections::HashMap::new();
-            let mut block_types: std::collections::HashMap<i64, String> = std::collections::HashMap::new();
+            let mut block_text: std::collections::HashMap<i64, String> =
+                std::collections::HashMap::new();
+            let mut block_json: std::collections::HashMap<i64, String> =
+                std::collections::HashMap::new();
+            let mut block_names: std::collections::HashMap<i64, String> =
+                std::collections::HashMap::new();
+            let mut block_types: std::collections::HashMap<i64, String> =
+                std::collections::HashMap::new();
 
             for (i, event) in events.iter().enumerate() {
-                let event_type = event
-                    .get("event")
-                    .and_then(|e| e.as_str())
-                    .unwrap_or("");
+                let event_type = event.get("event").and_then(|e| e.as_str()).unwrap_or("");
                 let data = &event["data"];
 
                 // Accumulate state
@@ -54,11 +55,15 @@ pub fn render_response_sse(req: &ProxyRequest) -> String {
                                 block_text.entry(index).or_default().push_str(text);
                             }
                             "thinking_delta" => {
-                                let text = delta.get("thinking").and_then(|v| v.as_str()).unwrap_or("");
+                                let text =
+                                    delta.get("thinking").and_then(|v| v.as_str()).unwrap_or("");
                                 block_text.entry(index).or_default().push_str(text);
                             }
                             "input_json_delta" => {
-                                let json = delta.get("partial_json").and_then(|v| v.as_str()).unwrap_or("");
+                                let json = delta
+                                    .get("partial_json")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("");
                                 block_json.entry(index).or_default().push_str(json);
                             }
                             _ => {}
@@ -137,7 +142,12 @@ pub fn summarize_sse_event(event_type: &str, data: &serde_json::Value) -> String
                 .pointer("/message/id")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            format!("{} {} {}", html_escape(model), html_escape(role), html_escape(id))
+            format!(
+                "{} {} {}",
+                html_escape(model),
+                html_escape(role),
+                html_escape(id)
+            )
         }
         "content_block_start" => {
             let btype = data

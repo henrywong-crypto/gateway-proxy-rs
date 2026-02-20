@@ -1,7 +1,7 @@
 use leptos::prelude::*;
 
-use common::models::Session;
 use crate::pages::page_layout;
+use common::models::Session;
 
 pub fn render_session_show(session: &Session, port: u16) -> String {
     let session = session.clone();
@@ -44,5 +44,8 @@ pub fn render_session_show(session: &Session, port: u16) -> String {
         </table>
     };
 
-    page_layout(&format!("Gateway Proxy - Session {}", session_name), body.to_html())
+    page_layout(
+        &format!("Gateway Proxy - Session {}", session_name),
+        body.to_html(),
+    )
 }

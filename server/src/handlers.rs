@@ -137,14 +137,14 @@ pub async fn clear_session_requests(
         return HttpResponse::InternalServerError().body(format!("DB error: {}", e));
     }
     HttpResponse::SeeOther()
-        .insert_header(("Location", format!("/_dashboard/sessions/{}/requests", session_id)))
+        .insert_header((
+            "Location",
+            format!("/_dashboard/sessions/{}/requests", session_id),
+        ))
         .finish()
 }
 
-pub async fn delete_session(
-    pool: web::Data<SqlitePool>,
-    path: web::Path<String>,
-) -> HttpResponse {
+pub async fn delete_session(pool: web::Data<SqlitePool>, path: web::Path<String>) -> HttpResponse {
     let session_id = path.into_inner();
     if let Err(e) = db::delete_session(pool.get_ref(), &session_id).await {
         return HttpResponse::InternalServerError().body(format!("DB error: {}", e));
@@ -183,7 +183,15 @@ pub async fn update_session(
     };
     let tls_verify_disabled = form.get("tls_verify_disabled").is_some_and(|v| v == "1");
 
-    match db::update_session(pool.get_ref(), &session_id, &name, &target_url, tls_verify_disabled).await {
+    match db::update_session(
+        pool.get_ref(),
+        &session_id,
+        &name,
+        &target_url,
+        tls_verify_disabled,
+    )
+    .await
+    {
         Ok(()) => HttpResponse::SeeOther()
             .insert_header(("Location", format!("/_dashboard/sessions/{}", session_id)))
             .finish(),
@@ -204,5 +212,7 @@ fn generate_session_id() -> String {
     use rand::Rng;
     let mut rng = rand::thread_rng();
     let chars: Vec<char> = "abcdefghijklmnopqrstuvwxyz0123456789".chars().collect();
-    (0..12).map(|_| chars[rng.gen_range(0..chars.len())]).collect()
+    (0..12)
+        .map(|_| chars[rng.gen_range(0..chars.len())])
+        .collect()
 }

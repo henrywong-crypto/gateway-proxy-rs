@@ -42,10 +42,12 @@ pub async fn list_sessions(pool: &SqlitePool) -> anyhow::Result<Vec<SessionWithC
 }
 
 pub async fn get_session(pool: &SqlitePool, id: &str) -> anyhow::Result<Option<Session>> {
-    Ok(sqlx::query_as::<_, Session>("SELECT id, name, target_url, tls_verify_disabled, created_at FROM sessions WHERE id = ?")
-        .bind(id)
-        .fetch_optional(pool)
-        .await?)
+    Ok(sqlx::query_as::<_, Session>(
+        "SELECT id, name, target_url, tls_verify_disabled, created_at FROM sessions WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?)
 }
 
 pub async fn create_session(
@@ -55,13 +57,15 @@ pub async fn create_session(
     target_url: &str,
     tls_verify_disabled: bool,
 ) -> anyhow::Result<()> {
-    sqlx::query("INSERT INTO sessions (id, name, target_url, tls_verify_disabled) VALUES (?, ?, ?, ?)")
-        .bind(id)
-        .bind(name)
-        .bind(target_url)
-        .bind(tls_verify_disabled)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "INSERT INTO sessions (id, name, target_url, tls_verify_disabled) VALUES (?, ?, ?, ?)",
+    )
+    .bind(id)
+    .bind(name)
+    .bind(target_url)
+    .bind(tls_verify_disabled)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -80,10 +84,7 @@ pub async fn list_requests(
     .await?)
 }
 
-pub async fn get_request(
-    pool: &SqlitePool,
-    req_id: i64,
-) -> anyhow::Result<Option<ProxyRequest>> {
+pub async fn get_request(pool: &SqlitePool, req_id: i64) -> anyhow::Result<Option<ProxyRequest>> {
     Ok(sqlx::query_as::<_, ProxyRequest>(
         "SELECT id, session_id, method, path, timestamp, headers_json, body_json, \
          truncated_json, model, tools_json, messages_json, system_json, params_json, \
@@ -96,40 +97,44 @@ pub async fn get_request(
     .pop())
 }
 
+pub struct InsertRequestParams<'a> {
+    pub session_id: &'a str,
+    pub method: &'a str,
+    pub path: &'a str,
+    pub timestamp: &'a str,
+    pub headers_json: Option<&'a str>,
+    pub body_json: Option<&'a str>,
+    pub truncated_json: Option<&'a str>,
+    pub model: Option<&'a str>,
+    pub tools_json: Option<&'a str>,
+    pub messages_json: Option<&'a str>,
+    pub system_json: Option<&'a str>,
+    pub params_json: Option<&'a str>,
+    pub note: Option<&'a str>,
+}
+
 pub async fn insert_request(
     pool: &SqlitePool,
-    session_id: &str,
-    method: &str,
-    path: &str,
-    timestamp: &str,
-    headers_json: Option<&str>,
-    body_json: Option<&str>,
-    truncated_json: Option<&str>,
-    model: Option<&str>,
-    tools_json: Option<&str>,
-    messages_json: Option<&str>,
-    system_json: Option<&str>,
-    params_json: Option<&str>,
-    note: Option<&str>,
+    params: &InsertRequestParams<'_>,
 ) -> anyhow::Result<i64> {
     let result = sqlx::query(
         "INSERT INTO requests (session_id, method, path, timestamp, headers_json, body_json, \
          truncated_json, model, tools_json, messages_json, system_json, params_json, note) \
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
-    .bind(session_id)
-    .bind(method)
-    .bind(path)
-    .bind(timestamp)
-    .bind(headers_json)
-    .bind(body_json)
-    .bind(truncated_json)
-    .bind(model)
-    .bind(tools_json)
-    .bind(messages_json)
-    .bind(system_json)
-    .bind(params_json)
-    .bind(note)
+    .bind(params.session_id)
+    .bind(params.method)
+    .bind(params.path)
+    .bind(params.timestamp)
+    .bind(params.headers_json)
+    .bind(params.body_json)
+    .bind(params.truncated_json)
+    .bind(params.model)
+    .bind(params.tools_json)
+    .bind(params.messages_json)
+    .bind(params.system_json)
+    .bind(params.params_json)
+    .bind(params.note)
     .execute(pool)
     .await?;
     Ok(result.last_insert_rowid())
@@ -184,12 +189,14 @@ pub async fn update_session(
     target_url: &str,
     tls_verify_disabled: bool,
 ) -> anyhow::Result<()> {
-    sqlx::query("UPDATE sessions SET name = ?, target_url = ?, tls_verify_disabled = ? WHERE id = ?")
-        .bind(name)
-        .bind(target_url)
-        .bind(tls_verify_disabled)
-        .bind(id)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "UPDATE sessions SET name = ?, target_url = ?, tls_verify_disabled = ? WHERE id = ?",
+    )
+    .bind(name)
+    .bind(target_url)
+    .bind(tls_verify_disabled)
+    .bind(id)
+    .execute(pool)
+    .await?;
     Ok(())
 }

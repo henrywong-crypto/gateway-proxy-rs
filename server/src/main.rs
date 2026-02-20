@@ -16,6 +16,9 @@ pub struct Args {
 
 #[actix_web::main]
 async fn main() -> anyhow::Result<()> {
+    env_logger::init_from_env(
+        env_logger::Env::default().default_filter_or("server=info,proxy=info"),
+    );
     let args = Args::parse();
     let port = args.port;
 
@@ -25,14 +28,8 @@ async fn main() -> anyhow::Result<()> {
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
 
-    println!(
-        "Gateway Proxy listening on http://localhost:{}",
-        port
-    );
-    println!(
-        "Dashboard at http://localhost:{}/_dashboard/",
-        port
-    );
+    log::info!("Gateway Proxy listening on http://localhost:{}", port);
+    log::info!("Dashboard at http://localhost:{}/_dashboard/", port);
 
     let args_data = web::Data::new(args);
     let pool_data = web::Data::new(pool);
@@ -47,18 +44,54 @@ async fn main() -> anyhow::Result<()> {
             .app_data(client_data.clone())
             .app_data(args_data.clone())
             .route("/_dashboard", web::get().to(handlers::home_page))
-            .route("/_dashboard/sessions", web::get().to(handlers::sessions_index))
-            .route("/_dashboard/sessions/new", web::get().to(handlers::new_session))
-            .route("/_dashboard/sessions/new", web::post().to(handlers::create_session))
-            .route("/_dashboard/sessions/{id}", web::get().to(handlers::session_show))
-            .route("/_dashboard/sessions/{id}/edit", web::get().to(handlers::edit_session))
-            .route("/_dashboard/sessions/{id}/edit", web::post().to(handlers::update_session))
-            .route("/_dashboard/sessions/{id}/requests", web::get().to(handlers::requests_index))
-            .route("/_dashboard/sessions/{id}/requests/{req_id}", web::get().to(handlers::request_detail))
-            .route("/_dashboard/sessions/{id}/requests/{req_id}/{page}", web::get().to(handlers::request_detail_page))
-            .route("/_dashboard/sessions/{id}/clear", web::post().to(handlers::clear_session_requests))
-            .route("/_dashboard/sessions/{id}/delete", web::post().to(handlers::delete_session))
-            .route("/_proxy/{session_id}/{tail:.*}", web::to(handlers::proxy_catch_all))
+            .route(
+                "/_dashboard/sessions",
+                web::get().to(handlers::sessions_index),
+            )
+            .route(
+                "/_dashboard/sessions/new",
+                web::get().to(handlers::new_session),
+            )
+            .route(
+                "/_dashboard/sessions/new",
+                web::post().to(handlers::create_session),
+            )
+            .route(
+                "/_dashboard/sessions/{id}",
+                web::get().to(handlers::session_show),
+            )
+            .route(
+                "/_dashboard/sessions/{id}/edit",
+                web::get().to(handlers::edit_session),
+            )
+            .route(
+                "/_dashboard/sessions/{id}/edit",
+                web::post().to(handlers::update_session),
+            )
+            .route(
+                "/_dashboard/sessions/{id}/requests",
+                web::get().to(handlers::requests_index),
+            )
+            .route(
+                "/_dashboard/sessions/{id}/requests/{req_id}",
+                web::get().to(handlers::request_detail),
+            )
+            .route(
+                "/_dashboard/sessions/{id}/requests/{req_id}/{page}",
+                web::get().to(handlers::request_detail_page),
+            )
+            .route(
+                "/_dashboard/sessions/{id}/clear",
+                web::post().to(handlers::clear_session_requests),
+            )
+            .route(
+                "/_dashboard/sessions/{id}/delete",
+                web::post().to(handlers::delete_session),
+            )
+            .route(
+                "/_proxy/{session_id}/{tail:.*}",
+                web::to(handlers::proxy_catch_all),
+            )
     })
     .bind(("0.0.0.0", port))?
     .run()

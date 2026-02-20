@@ -32,7 +32,11 @@ pub async fn proxy_handler(
         format!("/{}", full_path)
     };
 
-    let mut target_url = format!("{}{}", session.target_url.trim_end_matches('/'), target_path);
+    let mut target_url = format!(
+        "{}{}",
+        session.target_url.trim_end_matches('/'),
+        target_path
+    );
     if let Some(qs) = req.uri().query() {
         target_url.push('?');
         target_url.push_str(qs);
@@ -41,14 +45,28 @@ pub async fn proxy_handler(
     // Log the request
     let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
     let method = req.method().to_string();
+    let stored_path = {
+        let p = format!("/{}", full_path);
+        if let Some(qs) = req.uri().query() {
+            format!("{}?{}", p, qs)
+        } else {
+            p
+        }
+    };
+    log::info!(
+        "[{}] session={} origin={} {} {}",
+        timestamp,
+        session.name,
+        session.target_url,
+        method,
+        stored_path
+    );
     let headers_map: std::collections::HashMap<String, String> = req
         .headers()
         .iter()
-        .filter_map(|(k, v)| {
-            match v.to_str() {
-                Ok(s) => Some((k.to_string(), s.to_string())),
-                Err(_) => None,
-            }
+        .filter_map(|(k, v)| match v.to_str() {
+            Ok(s) => Some((k.to_string(), s.to_string())),
+            Err(_) => None,
         })
         .collect();
     let headers_json = match serde_json::to_string_pretty(&headers_map) {
@@ -86,7 +104,10 @@ pub async fn proxy_handler(
                 None
             }
         };
-        model = data.get("model").and_then(|v| v.as_str()).map(|s| s.to_string());
+        model = data
+            .get("model")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
 
         if let Some(tools) = data.get("tools").filter(|v| v.is_array()) {
             tools_json = match serde_json::to_string(tools) {
@@ -139,19 +160,21 @@ pub async fn proxy_handler(
 
     let request_id = match db::insert_request(
         pool.get_ref(),
-        session_id,
-        &method,
-        &format!("/{}", full_path),
-        &timestamp,
-        headers_json.as_deref(),
-        body_json.as_deref(),
-        truncated_json.as_deref(),
-        model.as_deref(),
-        tools_json.as_deref(),
-        messages_json.as_deref(),
-        system_json.as_deref(),
-        params_json.as_deref(),
-        note.as_deref(),
+        &db::InsertRequestParams {
+            session_id,
+            method: &method,
+            path: &stored_path,
+            timestamp: &timestamp,
+            headers_json: headers_json.as_deref(),
+            body_json: body_json.as_deref(),
+            truncated_json: truncated_json.as_deref(),
+            model: model.as_deref(),
+            tools_json: tools_json.as_deref(),
+            messages_json: messages_json.as_deref(),
+            system_json: system_json.as_deref(),
+            params_json: params_json.as_deref(),
+            note: note.as_deref(),
+        },
     )
     .await
     {
@@ -241,15 +264,14 @@ pub async fn proxy_handler(
                 None => false,
             };
 
-            let mut builder = HttpResponse::build(
-                match actix_web::http::StatusCode::from_u16(status) {
+            let mut builder =
+                HttpResponse::build(match actix_web::http::StatusCode::from_u16(status) {
                     Ok(s) => s,
                     Err(_) => {
                         return HttpResponse::BadGateway()
                             .body(format!("Invalid status code from upstream: {}", status));
                     }
-                },
-            );
+                });
             for (key, value) in upstream.headers() {
                 let k = key.as_str().to_lowercase();
                 if k == "transfer-encoding" || k == "content-encoding" {

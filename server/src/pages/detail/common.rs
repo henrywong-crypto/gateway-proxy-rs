@@ -1,12 +1,19 @@
 use leptos::prelude::*;
 
+use crate::pages::{collapsible_block, html_escape};
 use ::common::models::{ProxyRequest, Session};
-use crate::pages::{html_escape, collapsible_block};
 
-pub fn breadcrumb_html(session: &Session, req: &ProxyRequest, current_page: Option<(&str, &str)>) -> String {
+pub fn breadcrumb_html(
+    session: &Session,
+    req: &ProxyRequest,
+    current_page: Option<(&str, &str)>,
+) -> String {
     let session_href = format!("/_dashboard/sessions/{}", req.session_id);
     let requests_href = format!("/_dashboard/sessions/{}/requests", req.session_id);
-    let req_href = format!("/_dashboard/sessions/{}/requests/{}", req.session_id, req.id);
+    let req_href = format!(
+        "/_dashboard/sessions/{}/requests/{}",
+        req.session_id, req.id
+    );
     if let Some((_key, label)) = current_page {
         let page_part = format!(r#" / {}"#, html_escape(label));
         let view = view! {
@@ -51,9 +58,7 @@ pub fn render_kv_table(json_str: &str) -> String {
         return format!("<pre>{}</pre>", html_escape(json_str));
     };
 
-    let mut html = String::from(
-        "<table><tr><th>Key</th><th>Value</th></tr>",
-    );
+    let mut html = String::from("<table><tr><th>Key</th><th>Value</th></tr>");
     for (k, v) in obj {
         let val_str = if v.is_string() {
             v.as_str().unwrap_or("").to_string()

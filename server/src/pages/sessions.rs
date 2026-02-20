@@ -1,8 +1,8 @@
 use leptos::either::Either;
 use leptos::prelude::*;
 
-use common::models::{Session, SessionWithCount};
 use crate::pages::page_layout;
+use common::models::{Session, SessionWithCount};
 
 pub fn render_sessions_index(sessions: &[SessionWithCount]) -> String {
     let sessions = sessions.to_vec();
@@ -157,5 +157,8 @@ pub fn render_edit_session(session: &Session, port: u16) -> String {
         </table>
     };
 
-    page_layout(&format!("Gateway Proxy - Edit Session {}", session_name), body.to_html())
+    page_layout(
+        &format!("Gateway Proxy - Edit Session {}", session_name),
+        body.to_html(),
+    )
 }

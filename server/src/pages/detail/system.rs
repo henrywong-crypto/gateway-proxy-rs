@@ -16,10 +16,7 @@ pub fn render_system(json_str: &str) -> String {
         let mut html = String::from("<table><tr><th>Type</th><th>Content</th></tr>");
         for block in arr {
             let btype = block.get("type").and_then(|t| t.as_str()).unwrap_or("text");
-            let text = block
-                .get("text")
-                .and_then(|t| t.as_str())
-                .unwrap_or("");
+            let text = block.get("text").and_then(|t| t.as_str()).unwrap_or("");
             let fallback;
             let text = if text.is_empty() {
                 fallback = serde_json::to_string_pretty(block).unwrap_or_default();
