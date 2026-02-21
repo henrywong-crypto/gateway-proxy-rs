@@ -2,9 +2,9 @@ use leptos::either::Either;
 use leptos::prelude::*;
 
 use crate::pages::page_layout;
-use common::models::{Session, SessionWithCount};
+use common::models::Session;
 
-pub fn render_sessions_index(sessions: &[SessionWithCount]) -> String {
+pub fn render_sessions_index(sessions: &[Session]) -> String {
     let sessions = sessions.to_vec();
     let empty = sessions.is_empty();
     let body = view! {

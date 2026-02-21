@@ -1,0 +1,76 @@
+use sqlx::sqlite::SqlitePool;
+
+use common::models::Session;
+
+pub async fn list_sessions(pool: &SqlitePool) -> anyhow::Result<Vec<Session>> {
+    Ok(sqlx::query_as::<_, Session>(
+        "SELECT s.id, s.name, s.target_url, s.tls_verify_disabled, s.auth_header, s.created_at, \
+         COALESCE((SELECT COUNT(*) FROM requests r WHERE r.session_id = s.id), 0) as request_count \
+         FROM sessions s ORDER BY s.created_at DESC",
+    )
+    .fetch_all(pool)
+    .await?)
+}
+
+pub async fn get_session(pool: &SqlitePool, id: &str) -> anyhow::Result<Option<Session>> {
+    Ok(sqlx::query_as::<_, Session>(
+        "SELECT id, name, target_url, tls_verify_disabled, auth_header, created_at FROM sessions WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?)
+}
+
+pub async fn create_session(
+    pool: &SqlitePool,
+    id: &str,
+    name: &str,
+    target_url: &str,
+    tls_verify_disabled: bool,
+    auth_header: Option<&str>,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        "INSERT INTO sessions (id, name, target_url, tls_verify_disabled, auth_header) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(id)
+    .bind(name)
+    .bind(target_url)
+    .bind(tls_verify_disabled)
+    .bind(auth_header)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn delete_session(pool: &SqlitePool, session_id: &str) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM requests WHERE session_id = ?")
+        .bind(session_id)
+        .execute(pool)
+        .await?;
+    sqlx::query("DELETE FROM sessions WHERE id = ?")
+        .bind(session_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn update_session(
+    pool: &SqlitePool,
+    id: &str,
+    name: &str,
+    target_url: &str,
+    tls_verify_disabled: bool,
+    auth_header: Option<&str>,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        "UPDATE sessions SET name = ?, target_url = ?, tls_verify_disabled = ?, auth_header = ? WHERE id = ?",
+    )
+    .bind(name)
+    .bind(target_url)
+    .bind(tls_verify_disabled)
+    .bind(auth_header)
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}

@@ -8,6 +8,8 @@ pub struct Session {
     pub tls_verify_disabled: bool,
     pub auth_header: Option<String>,
     pub created_at: Option<String>,
+    #[sqlx(default)]
+    pub request_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -31,17 +33,6 @@ pub struct ProxyRequest {
     pub response_headers_json: Option<String>,
     pub response_body: Option<String>,
     pub response_events_json: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
-pub struct SessionWithCount {
-    pub id: String,
-    pub name: String,
-    pub target_url: String,
-    pub tls_verify_disabled: bool,
-    pub auth_header: Option<String>,
-    pub created_at: Option<String>,
-    pub request_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
