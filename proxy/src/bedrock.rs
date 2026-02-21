@@ -6,9 +6,9 @@ use futures::StreamExt;
 use sqlx::SqlitePool;
 
 use crate::shared::{
-    actix_headers_iter, effective_client, extract_request_fields, forward_response_headers,
+    effective_client, extract_request_fields, forward_response_headers,
     get_session_or_error, headers_to_json, is_sse_content_type, log_request, store_response,
-    to_actix_status, RequestMeta,
+    to_actix_status, actix_headers_iter, RequestMeta,
 };
 use crate::sse;
 
@@ -71,7 +71,6 @@ fn anthropic_event_to_bedrock_chunk(data_json: &str) -> Vec<u8> {
 
 struct SseParser {
     buffer: String,
-    current_event: Option<String>,
     current_data: Vec<String>,
 }
 
@@ -79,13 +78,12 @@ impl SseParser {
     fn new() -> Self {
         SseParser {
             buffer: String::new(),
-            current_event: None,
             current_data: Vec::new(),
         }
     }
 
-    /// Feed a chunk of text and return any complete (event_type, data) pairs.
-    fn feed(&mut self, chunk: &str) -> Vec<(String, String)> {
+    /// Feed a chunk of text and return completed event data strings.
+    fn feed(&mut self, chunk: &str) -> Vec<String> {
         self.buffer.push_str(chunk);
         let mut events = Vec::new();
 
@@ -96,89 +94,41 @@ impl SseParser {
             if line.is_empty() {
                 // Empty line = event boundary
                 if !self.current_data.is_empty() {
-                    let event_type = self.current_event.take().unwrap_or_default();
-                    let data = self.current_data.join("\n");
+                    events.push(self.current_data.join("\n"));
                     self.current_data.clear();
-                    events.push((event_type, data));
                 }
-            } else if let Some(rest) = line.strip_prefix("event:") {
-                self.current_event = Some(rest.trim().to_string());
-            } else if let Some(rest) = line.strip_prefix("data:") {
-                // Strip optional single leading space per SSE spec
-                let data = if let Some(stripped) = rest.strip_prefix(' ') {
-                    stripped
-                } else {
-                    rest
-                };
+            } else if line.starts_with("data:") {
+                let rest = &line["data:".len()..];
+                let data = rest.strip_prefix(' ').unwrap_or(rest);
                 self.current_data.push(data.to_string());
             }
-            // Ignore comment lines (starting with ':') and unknown fields
+            // Ignore event type, comment lines (starting with ':'), and unknown fields
         }
 
         events
     }
 
     /// Flush any remaining buffered event at end of stream.
-    fn flush(&mut self) -> Vec<(String, String)> {
-        let mut events = Vec::new();
-        if !self.current_data.is_empty() {
-            let event_type = self.current_event.take().unwrap_or_default();
+    fn flush(&mut self) -> Option<String> {
+        if self.current_data.is_empty() {
+            None
+        } else {
             let data = self.current_data.join("\n");
             self.current_data.clear();
-            events.push((event_type, data));
+            Some(data)
         }
-        events
     }
 }
 
-pub async fn bedrock_streaming_handler(
-    req: HttpRequest,
-    body: web::Bytes,
-    pool: web::Data<SqlitePool>,
-    client: web::Data<reqwest::Client>,
-) -> Result<HttpResponse, actix_web::Error> {
-    let session_id = req
-        .match_info()
-        .get("session_id")
-        .ok_or_else(|| ErrorBadRequest("Missing session_id"))?;
-    let model_id = req
-        .match_info()
-        .get("model_id")
-        .ok_or_else(|| ErrorBadRequest("Missing model_id"))?;
-
-    let session = get_session_or_error(pool.get_ref(), session_id).await?;
-
-    // Parse request body
-    let original_data: serde_json::Value =
-        serde_json::from_slice(&body).map_err(|e| ErrorBadRequest(format!("Invalid JSON body: {}", e)))?;
-
-    if !original_data.is_object() {
-        return Err(ErrorBadRequest("Request body must be a JSON object"));
-    }
-
-    // Log the ORIGINAL request to DB before translation
-    let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
-    let stored_path = format!("/model/{}/invoke-with-response-stream", model_id);
-
-    let req_headers_json = headers_to_json(actix_headers_iter(&req));
-    let fields = extract_request_fields(&original_data, Some(model_id.to_string()));
-
-    let request_id = log_request(
-        &RequestMeta {
-            pool: pool.get_ref(),
-            session_id,
-            method: "POST",
-            path: &stored_path,
-            timestamp: &timestamp,
-            headers_json: req_headers_json.as_deref(),
-            note: None,
-        },
-        &fields,
-    )
-    .await;
-
-    // Translate the request for upstream Anthropic API
-    let mut data = original_data;
+/// Translate a Bedrock-style request body into an Anthropic API request.
+/// Extracts `anthropic_version` and `anthropic_beta` from the body, adds
+/// `model` and `stream: true`, and returns the serialized body + headers.
+fn translate_bedrock_request(
+    req: &HttpRequest,
+    mut data: serde_json::Value,
+    model_id: &str,
+    auth_header: Option<&str>,
+) -> Result<(Vec<u8>, reqwest::header::HeaderMap), actix_web::Error> {
     let obj = data.as_object_mut().unwrap();
 
     // Extract anthropic_version and anthropic_beta from body
@@ -215,23 +165,18 @@ pub async fn bedrock_streaming_handler(
     );
     obj.insert("stream".to_string(), serde_json::Value::Bool(true));
 
-    let translated_body = serde_json::to_vec(&data)
+    let body = serde_json::to_vec(&data)
         .map_err(|e| ErrorInternalServerError(format!("Failed to serialize translated body: {}", e)))?;
 
-    // Build upstream request
-    let target_url = format!(
-        "{}/v1/messages",
-        session.target_url.trim_end_matches('/')
-    );
-
-    let mut forward_headers = reqwest::header::HeaderMap::new();
-    forward_headers.insert(
+    // Build headers
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
         reqwest::header::CONTENT_TYPE,
         reqwest::header::HeaderValue::from_static("application/json"),
     );
     if let Some(ref ver) = anthropic_version {
         if let Ok(val) = reqwest::header::HeaderValue::from_str(ver) {
-            forward_headers.insert(
+            headers.insert(
                 reqwest::header::HeaderName::from_static("anthropic-version"),
                 val,
             );
@@ -239,21 +184,115 @@ pub async fn bedrock_streaming_handler(
     }
     if let Some(ref beta) = anthropic_beta {
         if let Ok(val) = reqwest::header::HeaderValue::from_str(beta) {
-            forward_headers.insert(
+            headers.insert(
                 reqwest::header::HeaderName::from_static("anthropic-beta"),
                 val,
             );
         }
     }
-    if let Some(ref auth_value) = session.auth_header {
+    if let Some(auth_value) = auth_header {
         if let Ok(val) = reqwest::header::HeaderValue::from_str(auth_value) {
-            forward_headers.insert(
+            headers.insert(
                 reqwest::header::HeaderName::from_static("x-api-key"),
                 val,
             );
         }
     }
 
+    Ok((body, headers))
+}
+
+/// Handle a non-streaming upstream response: log warnings for errors, store
+/// in DB, and return the actix response.
+async fn handle_non_streaming_response(
+    upstream: reqwest::Response,
+    status: u16,
+    actix_status: actix_web::http::StatusCode,
+    session_name: &str,
+    stored_path: &str,
+    request_id: &Option<String>,
+    pool: &SqlitePool,
+    resp_headers_json: Option<&str>,
+) -> Result<HttpResponse, actix_web::Error> {
+    let mut builder = HttpResponse::build(actix_status);
+    forward_response_headers(&mut builder, upstream.headers());
+
+    let response_body = upstream
+        .bytes()
+        .await
+        .map_err(|e| ErrorBadGateway(format!("Failed to read upstream response body: {}", e)))?;
+
+    if status >= 400 {
+        let body_preview = String::from_utf8_lossy(&response_body);
+        log::warn!(
+            "{} POST {} -> {} {}",
+            session_name,
+            stored_path,
+            status,
+            &body_preview[..body_preview.len().min(500)],
+        );
+    }
+
+    if let Some(ref req_id) = request_id {
+        let body_str = String::from_utf8_lossy(&response_body);
+        store_response(pool, req_id, status, resp_headers_json, &body_str, false).await;
+    }
+
+    Ok(builder.body(response_body.to_vec()))
+}
+
+pub async fn bedrock_streaming_handler(
+    req: HttpRequest,
+    body: web::Bytes,
+    pool: web::Data<SqlitePool>,
+    client: web::Data<reqwest::Client>,
+) -> Result<HttpResponse, actix_web::Error> {
+    let session_id = req
+        .match_info()
+        .get("session_id")
+        .ok_or_else(|| ErrorBadRequest("Missing session_id"))?;
+    let model_id = req
+        .match_info()
+        .get("model_id")
+        .ok_or_else(|| ErrorBadRequest("Missing model_id"))?;
+
+    let session = get_session_or_error(pool.get_ref(), session_id).await?;
+
+    // Parse and log the original request
+    let original_data: serde_json::Value =
+        serde_json::from_slice(&body).map_err(|e| ErrorBadRequest(format!("Invalid JSON body: {}", e)))?;
+    if !original_data.is_object() {
+        return Err(ErrorBadRequest("Request body must be a JSON object"));
+    }
+
+    let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
+    let stored_path = format!("/model/{}/invoke-with-response-stream", model_id);
+    let req_headers_json = headers_to_json(actix_headers_iter(&req));
+    let fields = extract_request_fields(&original_data, Some(model_id.to_string()));
+
+    let request_id = log_request(
+        &RequestMeta {
+            pool: pool.get_ref(),
+            session_id,
+            method: "POST",
+            path: &stored_path,
+            timestamp: &timestamp,
+            headers_json: req_headers_json.as_deref(),
+            note: None,
+        },
+        &fields,
+    )
+    .await;
+
+    // Translate request and send upstream
+    let (translated_body, forward_headers) = translate_bedrock_request(
+        &req,
+        original_data,
+        model_id,
+        session.auth_header.as_deref(),
+    )?;
+
+    let target_url = format!("{}/v1/messages", session.target_url.trim_end_matches('/'));
     let effective_client = effective_client(&session, client.get_ref());
 
     log::info!("{} POST {} -> {}", session.name, stored_path, target_url);
@@ -267,7 +306,6 @@ pub async fn bedrock_streaming_handler(
         .map_err(|e| ErrorBadGateway(format!("Upstream error: {}", e)))?;
 
     let status = upstream.status().as_u16();
-
     let resp_headers_json = headers_to_json(upstream.headers().iter().filter_map(|(k, v)| {
         v.to_str().ok().map(|s| (k.to_string(), s.to_string()))
     }));
@@ -275,39 +313,17 @@ pub async fn bedrock_streaming_handler(
     let actix_status = to_actix_status(status)?;
 
     if !is_sse {
-        let mut builder = HttpResponse::build(actix_status);
-        forward_response_headers(&mut builder, upstream.headers());
-
-        let response_body = upstream
-            .bytes()
-            .await
-            .map_err(|e| ErrorBadGateway(format!("Failed to read upstream response body: {}", e)))?;
-
-        if status >= 400 {
-            let body_preview = String::from_utf8_lossy(&response_body);
-            log::warn!(
-                "{} POST {} -> {} {}",
-                session.name,
-                stored_path,
-                status,
-                &body_preview[..body_preview.len().min(500)],
-            );
-        }
-
-        if let Some(ref req_id) = request_id {
-            let body_str = String::from_utf8_lossy(&response_body);
-            store_response(
-                pool.get_ref(),
-                req_id,
-                status,
-                resp_headers_json.as_deref(),
-                &body_str,
-                false,
-            )
-            .await;
-        }
-
-        return Ok(builder.body(response_body.to_vec()));
+        return handle_non_streaming_response(
+            upstream,
+            status,
+            actix_status,
+            &session.name,
+            &stored_path,
+            &request_id,
+            pool.get_ref(),
+            resp_headers_json.as_deref(),
+        )
+        .await;
     }
 
     // Streaming SSE response — convert to Bedrock Event Stream format
@@ -322,7 +338,6 @@ pub async fn bedrock_streaming_handler(
     let resp_headers_json_bg = resp_headers_json.clone();
 
     let (tx, rx) = futures::channel::mpsc::unbounded::<Result<Bytes, actix_web::Error>>();
-
     let mut byte_stream = upstream.bytes_stream();
 
     actix_web::rt::spawn(async move {
@@ -335,9 +350,7 @@ pub async fn bedrock_streaming_handler(
                     accumulated.extend_from_slice(&chunk);
 
                     let chunk_str = String::from_utf8_lossy(&chunk);
-                    let events = parser.feed(&chunk_str);
-
-                    for (_event_type, data) in events {
+                    for data in parser.feed(&chunk_str) {
                         let frame = anthropic_event_to_bedrock_chunk(&data);
                         if tx.unbounded_send(Ok(Bytes::from(frame))).is_err() {
                             return; // Client disconnected
@@ -354,14 +367,12 @@ pub async fn bedrock_streaming_handler(
             }
         }
 
-        // Flush any remaining SSE event at end of stream
-        let remaining = parser.flush();
-        for (_event_type, data) in remaining {
+        if let Some(data) = parser.flush() {
             let frame = anthropic_event_to_bedrock_chunk(&data);
             let _ = tx.unbounded_send(Ok(Bytes::from(frame)));
         }
 
-        // Stream finished — save accumulated response to DB
+        // Store accumulated response to DB
         if let Some(req_id) = request_id_bg {
             let body_str = String::from_utf8_lossy(&accumulated);
             let events = sse::parse_sse_events(&body_str);
@@ -394,9 +405,7 @@ mod tests {
     fn sse_parser_single_event() {
         let mut parser = SseParser::new();
         let events = parser.feed("event: message_start\ndata: {\"type\":\"message_start\"}\n\n");
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].0, "message_start");
-        assert_eq!(events[0].1, "{\"type\":\"message_start\"}");
+        assert_eq!(events, vec!["{\"type\":\"message_start\"}"]);
     }
 
     #[test]
@@ -405,9 +414,7 @@ mod tests {
         let events1 = parser.feed("event: content\nda");
         assert!(events1.is_empty());
         let events2 = parser.feed("ta: hello world\n\n");
-        assert_eq!(events2.len(), 1);
-        assert_eq!(events2[0].0, "content");
-        assert_eq!(events2[0].1, "hello world");
+        assert_eq!(events2, vec!["hello world"]);
     }
 
     #[test]
@@ -416,56 +423,43 @@ mod tests {
         let events = parser.feed(
             "event: a\ndata: one\n\nevent: b\ndata: two\n\n",
         );
-        assert_eq!(events.len(), 2);
-        assert_eq!(events[0], ("a".to_string(), "one".to_string()));
-        assert_eq!(events[1], ("b".to_string(), "two".to_string()));
+        assert_eq!(events, vec!["one", "two"]);
     }
 
     #[test]
     fn sse_parser_multiline_data() {
         let mut parser = SseParser::new();
         let events = parser.feed("event: msg\ndata: line1\ndata: line2\n\n");
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].1, "line1\nline2");
+        assert_eq!(events, vec!["line1\nline2"]);
     }
 
     #[test]
     fn sse_parser_flush() {
         let mut parser = SseParser::new();
-        // Trailing newline so the data line is processed, but no blank line to emit the event
         let events = parser.feed("event: last\ndata: final\n");
         assert!(events.is_empty());
-        let flushed = parser.flush();
-        assert_eq!(flushed.len(), 1);
-        assert_eq!(flushed[0].0, "last");
-        assert_eq!(flushed[0].1, "final");
+        assert_eq!(parser.flush(), Some("final".to_string()));
     }
 
     #[test]
     fn sse_parser_comments_ignored() {
         let mut parser = SseParser::new();
         let events = parser.feed(": this is a comment\nevent: ping\ndata: pong\n\n");
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].0, "ping");
-        assert_eq!(events[0].1, "pong");
+        assert_eq!(events, vec!["pong"]);
     }
 
     #[test]
     fn sse_parser_no_event_field() {
         let mut parser = SseParser::new();
         let events = parser.feed("data: just data\n\n");
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].0, ""); // default empty event type
-        assert_eq!(events[0].1, "just data");
+        assert_eq!(events, vec!["just data"]);
     }
 
     #[test]
     fn sse_parser_carriage_returns() {
         let mut parser = SseParser::new();
         let events = parser.feed("event: cr\r\ndata: value\r\n\r\n");
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].0, "cr");
-        assert_eq!(events[0].1, "value");
+        assert_eq!(events, vec!["value"]);
     }
 
     // --- Event Stream encoding tests ---

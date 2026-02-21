@@ -1,6 +1,6 @@
 use actix_web::error::{ErrorBadGateway, ErrorInternalServerError, ErrorNotFound};
 use actix_web::http::StatusCode;
-use actix_web::HttpResponseBuilder;
+use actix_web::{HttpRequest, HttpResponseBuilder};
 use common::truncate::truncate_strings;
 use serde_json::Value;
 use sqlx::SqlitePool;
@@ -234,6 +234,79 @@ pub fn actix_headers_iter(
             .ok()
             .map(|s| (k.to_string(), s.to_string()))
     })
+}
+
+/// Build the full target URL from a session's base URL, the request path, and
+/// an optional query string.
+pub fn build_target_url(base_url: &str, path: &str, query: Option<&str>) -> String {
+    let target_path = if path.is_empty() {
+        String::new()
+    } else {
+        format!("/{}", path)
+    };
+    let mut url = format!("{}{}", base_url.trim_end_matches('/'), target_path);
+    if let Some(qs) = query {
+        url.push('?');
+        url.push_str(qs);
+    }
+    url
+}
+
+/// Build the stored path shown in the UI (always prefixed with `/`).
+pub fn build_stored_path(path: &str, query: Option<&str>) -> String {
+    let p = format!("/{}", path);
+    if let Some(qs) = query {
+        format!("{}?{}", p, qs)
+    } else {
+        p
+    }
+}
+
+/// Copy headers from an actix HttpRequest into a reqwest HeaderMap, skipping
+/// the `Host` header. If `auth_header` is provided, it is injected as the
+/// given `auth_header_name` (e.g. `Authorization` or `x-api-key`).
+pub fn build_forward_headers(
+    req: &HttpRequest,
+    auth_header: Option<&str>,
+    auth_header_name: &str,
+) -> reqwest::header::HeaderMap {
+    let mut map = reqwest::header::HeaderMap::new();
+    for (key, value) in req.headers() {
+        if key.as_str().eq_ignore_ascii_case("host") {
+            continue;
+        }
+        if let Ok(name) = reqwest::header::HeaderName::from_bytes(key.as_ref()) {
+            if let Ok(val) = reqwest::header::HeaderValue::from_bytes(value.as_bytes()) {
+                map.insert(name, val);
+            }
+        }
+    }
+    if let Some(auth_value) = auth_header {
+        if let Ok(name) = reqwest::header::HeaderName::from_bytes(auth_header_name.as_bytes()) {
+            if let Ok(val) = reqwest::header::HeaderValue::from_str(auth_value) {
+                map.insert(name, val);
+            }
+        }
+    }
+    map
+}
+
+/// Parse the request body and extract fields for DB logging.
+/// Returns `(ParsedRequestBody, optional_note)`.
+pub fn parse_body_fields(
+    body: &[u8],
+    url_model: Option<String>,
+) -> (ParsedRequestBody, Option<String>) {
+    if body.is_empty() {
+        (ParsedRequestBody::default(), Some("no body".to_string()))
+    } else if let Ok(data) = serde_json::from_slice::<Value>(body) {
+        (extract_request_fields(&data, url_model), None)
+    } else {
+        (
+            ParsedRequestBody::default(),
+            Some(format!("non-JSON body, {} bytes", body.len())),
+        )
+    }
 }
 
 #[cfg(test)]

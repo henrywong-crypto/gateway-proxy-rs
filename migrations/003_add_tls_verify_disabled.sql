@@ -1,1 +1,0 @@
-ALTER TABLE sessions ADD COLUMN tls_verify_disabled INTEGER NOT NULL DEFAULT 0;
