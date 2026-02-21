@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS system_filters (
+    id TEXT PRIMARY KEY,
+    pattern TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);

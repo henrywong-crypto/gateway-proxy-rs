@@ -6,12 +6,13 @@ pub struct Session {
     pub name: String,
     pub target_url: String,
     pub tls_verify_disabled: bool,
+    pub auth_header: Option<String>,
     pub created_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct ProxyRequest {
-    pub id: i64,
+    pub id: String,
     pub session_id: String,
     pub method: String,
     pub path: String,
@@ -38,6 +39,14 @@ pub struct SessionWithCount {
     pub name: String,
     pub target_url: String,
     pub tls_verify_disabled: bool,
+    pub auth_header: Option<String>,
     pub created_at: Option<String>,
     pub request_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct SystemFilter {
+    pub id: String,
+    pub pattern: String,
+    pub created_at: Option<String>,
 }

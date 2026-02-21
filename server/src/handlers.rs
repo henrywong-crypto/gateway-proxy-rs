@@ -33,9 +33,13 @@ pub async fn create_session(
         _ => return HttpResponse::BadRequest().body("Name and target_url are required"),
     };
     let tls_verify_disabled = form.get("tls_verify_disabled").is_some_and(|v| v == "1");
+    let auth_header = form.get("auth_header").and_then(|v| {
+        let trimmed = v.trim();
+        if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+    });
 
-    let id = generate_session_id();
-    match db::create_session(pool.get_ref(), &id, &name, &target_url, tls_verify_disabled).await {
+    let id = db::generate_id();
+    match db::create_session(pool.get_ref(), &id, &name, &target_url, tls_verify_disabled, auth_header.as_deref()).await {
         Ok(()) => HttpResponse::SeeOther()
             .insert_header(("Location", format!("/_dashboard/sessions/{}", id)))
             .finish(),
@@ -85,7 +89,7 @@ pub async fn requests_index(
 
 pub async fn request_detail(
     pool: web::Data<SqlitePool>,
-    path: web::Path<(String, i64)>,
+    path: web::Path<(String, String)>,
 ) -> HttpResponse {
     let (session_id, req_id) = path.into_inner();
 
@@ -95,7 +99,7 @@ pub async fn request_detail(
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
 
-    let request = match db::get_request(pool.get_ref(), req_id).await {
+    let request = match db::get_request(pool.get_ref(), &req_id).await {
         Ok(Some(r)) => r,
         Ok(None) => return HttpResponse::NotFound().body("Request not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
@@ -107,7 +111,7 @@ pub async fn request_detail(
 
 pub async fn request_detail_page(
     pool: web::Data<SqlitePool>,
-    path: web::Path<(String, i64, String)>,
+    path: web::Path<(String, String, String)>,
     query: web::Query<std::collections::HashMap<String, String>>,
 ) -> HttpResponse {
     let (session_id, req_id, page) = path.into_inner();
@@ -118,13 +122,24 @@ pub async fn request_detail_page(
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
 
-    let request = match db::get_request(pool.get_ref(), req_id).await {
+    let request = match db::get_request(pool.get_ref(), &req_id).await {
         Ok(Some(r)) => r,
         Ok(None) => return HttpResponse::NotFound().body("Request not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
 
-    let html = pages::detail::render_detail_page(&request, &session, &page, &query);
+    let filters: Vec<String> = if page == "system" {
+        db::list_system_filters(pool.get_ref())
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|f| f.pattern)
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    let html = pages::detail::render_detail_page(&request, &session, &page, &query, &filters);
     HttpResponse::Ok().content_type("text/html").body(html)
 }
 
@@ -182,6 +197,10 @@ pub async fn update_session(
         _ => return HttpResponse::BadRequest().body("Name and target_url are required"),
     };
     let tls_verify_disabled = form.get("tls_verify_disabled").is_some_and(|v| v == "1");
+    let auth_header = form.get("auth_header").and_then(|v| {
+        let trimmed = v.trim();
+        if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+    });
 
     match db::update_session(
         pool.get_ref(),
@@ -189,6 +208,7 @@ pub async fn update_session(
         &name,
         &target_url,
         tls_verify_disabled,
+        auth_header.as_deref(),
     )
     .await
     {
@@ -199,6 +219,41 @@ pub async fn update_session(
     }
 }
 
+pub async fn filters_page(
+    pool: web::Data<SqlitePool>,
+) -> HttpResponse {
+    match db::list_system_filters(pool.get_ref()).await {
+        Ok(filters) => {
+            let html = pages::filters::render_filters_page(&filters);
+            HttpResponse::Ok().content_type("text/html").body(html)
+        }
+        Err(e) => HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
+    }
+}
+
+pub async fn filters_post(
+    pool: web::Data<SqlitePool>,
+    form: web::Form<std::collections::HashMap<String, String>>,
+    query: web::Query<std::collections::HashMap<String, String>>,
+) -> HttpResponse {
+    if let Some(delete_id) = query.get("delete") {
+        let _ = db::delete_system_filter(pool.get_ref(), delete_id).await;
+    } else if let Some(edit_id) = query.get("edit") {
+        if let Some(pattern) = form.get("pattern") {
+            if !pattern.is_empty() {
+                let _ = db::update_system_filter(pool.get_ref(), edit_id, pattern).await;
+            }
+        }
+    } else if let Some(pattern) = form.get("pattern") {
+        if !pattern.is_empty() {
+            let _ = db::add_system_filter(pool.get_ref(), pattern).await;
+        }
+    }
+    HttpResponse::SeeOther()
+        .insert_header(("Location", "/_dashboard/filters"))
+        .finish()
+}
+
 pub async fn proxy_catch_all(
     req: HttpRequest,
     body: web::Bytes,
@@ -206,13 +261,4 @@ pub async fn proxy_catch_all(
     client: web::Data<reqwest::Client>,
 ) -> HttpResponse {
     proxy::proxy_handler(req, body, pool, client).await
-}
-
-fn generate_session_id() -> String {
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
-    let chars: Vec<char> = "abcdefghijklmnopqrstuvwxyz0123456789".chars().collect();
-    (0..12)
-        .map(|_| chars[rng.gen_range(0..chars.len())])
-        .collect()
 }

@@ -1,4 +1,5 @@
 pub mod detail;
+pub mod filters;
 pub mod home;
 pub mod requests;
 pub mod session_show;
@@ -28,6 +29,8 @@ details.collapsible[open] > summary .preview-text {{ display: none; }}
 details.collapsible[open] > summary .show-more {{ display: none; }}
 details.collapsible[open] > summary .show-less {{ display: inline; }}
 .hidden {{ display: none; }}
+.filtered-row {{ opacity: 0.45; }}
+.filtered-badge {{ color: #888; font-weight: bold; font-size: 0.85em; }}
 </style>
 </head>
 <body>

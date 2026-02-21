@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 
 CREATE TABLE IF NOT EXISTS requests (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL REFERENCES sessions(id),
     method TEXT NOT NULL,
     path TEXT NOT NULL,

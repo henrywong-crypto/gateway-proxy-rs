@@ -198,6 +198,13 @@ pub async fn proxy_handler(
         }
     }
 
+    // Inject session-level Authorization header (overwrite any existing)
+    if let Some(ref auth_value) = session.auth_header {
+        if let Ok(val) = reqwest::header::HeaderValue::from_str(auth_value) {
+            forward_headers.insert(reqwest::header::AUTHORIZATION, val);
+        }
+    }
+
     // Build a separate client if TLS verification is disabled for this session
     let insecure_client;
     let effective_client: &reqwest::Client = if session.tls_verify_disabled {
@@ -294,7 +301,7 @@ pub async fn proxy_handler(
             };
 
             // Store response data
-            if let Some(req_id) = request_id {
+            if let Some(ref req_id) = request_id {
                 let body_str = String::from_utf8_lossy(&response_body);
                 let (resp_body, resp_events) = if is_sse {
                     let events = sse::parse_sse_events(&body_str);

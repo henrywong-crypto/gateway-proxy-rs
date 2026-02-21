@@ -16,7 +16,7 @@ pub fn render_sessions_index(sessions: &[SessionWithCount]) -> String {
         <h2>"Navigation"</h2>
         <table>
             <tr><td><a href="/_dashboard/sessions/new">"New Session"</a></td></tr>
-            <tr><td><a href="/_dashboard">"Back"</a></td></tr>
+            <tr><td><a href="javascript:history.back()">"Back"</a></td></tr>
         </table>
         <h2>"Sessions"</h2>
         {if empty {
@@ -27,6 +27,7 @@ pub fn render_sessions_index(sessions: &[SessionWithCount]) -> String {
             Either::Right(view! {
                 <table>
                     <tr>
+                        <th>"ID"</th>
                         <th>"Name"</th>
                         <th>"Target URL"</th>
                         <th>"Requests"</th>
@@ -39,7 +40,8 @@ pub fn render_sessions_index(sessions: &[SessionWithCount]) -> String {
                         let delete_action = format!("/_dashboard/sessions/{}/delete", s.id);
                         view! {
                             <tr>
-                                <td><a href={href}>{s.name}</a></td>
+                                <td><a href={href}>{s.id.clone()}</a></td>
+                                <td>{s.name}</td>
                                 <td>{s.target_url}</td>
                                 <td>{s.request_count}</td>
                                 <td>{s.created_at.clone().unwrap_or_default()}</td>
@@ -73,7 +75,7 @@ pub fn render_new_session() -> String {
         </h1>
         <h2>"Navigation"</h2>
         <table>
-            <tr><td><a href="/_dashboard/sessions">"Back"</a></td></tr>
+            <tr><td><a href="javascript:history.back()">"Back"</a></td></tr>
         </table>
         <h2>"New Session"</h2>
         <form method="POST" action="/_dashboard/sessions/new">
@@ -89,6 +91,10 @@ pub fn render_new_session() -> String {
                 <tr>
                     <td><label>"Disable TLS Verify"</label></td>
                     <td><input type="checkbox" name="tls_verify_disabled" value="1"/></td>
+                </tr>
+                <tr>
+                    <td><label>"Authorization Header"</label></td>
+                    <td><input type="text" name="auth_header" placeholder="Bearer sk-..." size="40"/></td>
                 </tr>
                 <tr>
                     <td></td>
@@ -108,6 +114,7 @@ pub fn render_edit_session(session: &Session, port: u16) -> String {
     let requests_href = format!("/_dashboard/sessions/{}/requests", session.id);
     let back_href = format!("/_dashboard/sessions/{}", session.id);
     let tls_disabled = session.tls_verify_disabled;
+    let auth_header_val = session.auth_header.clone().unwrap_or_default();
 
     let body = view! {
         <h1>
@@ -121,7 +128,7 @@ pub fn render_edit_session(session: &Session, port: u16) -> String {
         </h1>
         <h2>"Navigation"</h2>
         <table>
-            <tr><td><a href={back_href}>"Back"</a></td></tr>
+            <tr><td><a href="javascript:history.back()">"Back"</a></td></tr>
         </table>
         <h2>"Info"</h2>
         <table>
@@ -144,6 +151,10 @@ pub fn render_edit_session(session: &Session, port: u16) -> String {
                 <tr>
                     <td><label>"Disable TLS Verify"</label></td>
                     <td><input type="checkbox" name="tls_verify_disabled" value="1" checked={tls_disabled}/></td>
+                </tr>
+                <tr>
+                    <td><label>"Authorization Header"</label></td>
+                    <td><input type="text" name="auth_header" value={auth_header_val} placeholder="Bearer sk-..." size="40"/></td>
                 </tr>
                 <tr>
                     <td></td>

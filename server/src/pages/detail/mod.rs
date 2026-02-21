@@ -67,15 +67,13 @@ pub fn render_detail_overview(req: &ProxyRequest, session: &Session) -> String {
         req.response_events_json.is_some(),
     )]);
 
-    let requests_href = format!("/_dashboard/sessions/{}/requests", req.session_id);
-
     let bc = breadcrumb_html(session, &req, None);
 
     let body = view! {
         <div inner_html={bc}/>
         <h2>"Navigation"</h2>
         <table>
-            <tr><td><a href={requests_href}>"Back"</a></td></tr>
+            <tr><td><a href="javascript:history.back()">"Back"</a></td></tr>
         </table>
         <h2>"Info"</h2>
         <table>
@@ -100,6 +98,7 @@ pub fn render_detail_page(
     session: &Session,
     page: &str,
     query: &std::collections::HashMap<String, String>,
+    filters: &[String],
 ) -> String {
     let req = req.clone();
     let page_label = match page {
@@ -158,7 +157,7 @@ pub fn render_detail_page(
         "system" => req
             .system_json
             .as_deref()
-            .map(render_system)
+            .map(|s| render_system(s, filters))
             .unwrap_or_else(|| "<p>No system prompt.</p>".to_string()),
         "tools" => req
             .tools_json
@@ -208,16 +207,12 @@ pub fn render_detail_page(
     };
 
     let bc = breadcrumb_html(session, &req, Some((page, page_label)));
-    let back_href = format!(
-        "/_dashboard/sessions/{}/requests/{}",
-        req.session_id, req.id
-    );
 
     let body = view! {
         <div inner_html={bc}/>
         <h2>"Navigation"</h2>
         <table>
-            <tr><td><a href={back_href}>"Back"</a></td></tr>
+            <tr><td><a href="javascript:history.back()">"Back"</a></td></tr>
         </table>
         <h2>{page_label}</h2>
         <div inner_html={controls_html}/>

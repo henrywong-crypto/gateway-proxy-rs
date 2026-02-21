@@ -41,7 +41,7 @@ pub fn render_requests_index(
         </h1>
         <h2>"Navigation"</h2>
         <table>
-            <tr><td><a href={format!("/_dashboard/sessions/{}", session.id)}>{"Back"}</a></td></tr>
+            <tr><td><a href="javascript:history.back()">{"Back"}</a></td></tr>
         </table>
         <h2>"Requests"</h2>
         <a href={refresh_href}>{refresh_label}</a>

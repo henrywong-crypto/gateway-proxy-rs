@@ -21,7 +21,7 @@ pub fn render_session_show(session: &Session, port: u16) -> String {
         <h2>"Navigation"</h2>
         <table>
             <tr><td><a href={edit_href}>"Edit Session"</a></td></tr>
-            <tr><td><a href="/_dashboard/sessions">"Back"</a></td></tr>
+            <tr><td><a href="javascript:history.back()">"Back"</a></td></tr>
         </table>
         <h2>"Info"</h2>
         <table>

@@ -1,14 +1,40 @@
+use regex::Regex;
+
 use crate::pages::{collapsible_block, html_escape};
 
-pub fn render_system(json_str: &str) -> String {
+fn matched_filter<'a>(text: &str, filters: &'a [String]) -> Option<&'a str> {
+    filters.iter().find_map(|f| {
+        let matched = match Regex::new(f) {
+            Ok(re) => re.is_match(text),
+            Err(_) => text.contains(f.as_str()),
+        };
+        if matched { Some(f.as_str()) } else { None }
+    })
+}
+
+fn filtered_content(text: &str, filter_pattern: Option<&str>) -> String {
+    if filter_pattern.is_some() {
+        format!(
+            "<span class=\"filtered-badge\">[FILTERED]</span> {}",
+            collapsible_block(text, "")
+        )
+    } else {
+        collapsible_block(text, "")
+    }
+}
+
+pub fn render_system(json_str: &str, filters: &[String]) -> String {
     let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) else {
         return format!("<pre>{}</pre>", html_escape(json_str));
     };
 
     if let Some(s) = val.as_str() {
+        let filter_match = matched_filter(s, filters);
+        let row_class = if filter_match.is_some() { " class=\"filtered-row\"" } else { "" };
         return format!(
-            "<table><tr><th>Type</th><th>Content</th></tr><tr><td>text</td><td>{}</td></tr></table>",
-            collapsible_block(s, "")
+            "<table><tr><th>Type</th><th>Content</th></tr><tr{}><td>text</td><td>{}</td></tr></table>",
+            row_class,
+            filtered_content(s, filter_match)
         );
     }
 
@@ -24,6 +50,8 @@ pub fn render_system(json_str: &str) -> String {
             } else {
                 text
             };
+            let filter_match = matched_filter(text, filters);
+            let row_class = if filter_match.is_some() { " class=\"filtered-row\"" } else { "" };
             let cache_info = block
                 .get("cache_control")
                 .and_then(|c| c.get("type"))
@@ -31,10 +59,11 @@ pub fn render_system(json_str: &str) -> String {
                 .map(|t| format!(" (cache: {})", html_escape(t)))
                 .unwrap_or_default();
             html.push_str(&format!(
-                "<tr><td>{}{}</td><td>{}</td></tr>",
+                "<tr{}><td>{}{}</td><td>{}</td></tr>",
+                row_class,
                 html_escape(btype),
                 cache_info,
-                collapsible_block(text, "")
+                filtered_content(text, filter_match)
             ));
         }
         html.push_str("</table>");

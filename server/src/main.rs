@@ -69,6 +69,14 @@ async fn main() -> anyhow::Result<()> {
                 web::post().to(handlers::update_session),
             )
             .route(
+                "/_dashboard/filters",
+                web::get().to(handlers::filters_page),
+            )
+            .route(
+                "/_dashboard/filters",
+                web::post().to(handlers::filters_post),
+            )
+            .route(
                 "/_dashboard/sessions/{id}/requests",
                 web::get().to(handlers::requests_index),
             )

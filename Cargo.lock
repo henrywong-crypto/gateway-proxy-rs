@@ -761,6 +761,7 @@ dependencies = [
  "anyhow",
  "common",
  "sqlx",
+ "uuid",
 ]
 
 [[package]]
@@ -3002,7 +3003,7 @@ dependencies = [
  "leptos",
  "log",
  "proxy",
- "rand 0.8.5",
+ "regex",
  "reqwest",
  "serde_json",
  "sqlx",
