@@ -7,6 +7,7 @@ pub fn render_session_show(session: &Session, port: u16) -> String {
     let session = session.clone();
     let session_name = session.name.clone();
     let proxy_url = format!("http://localhost:{}/_proxy/{}/", port, session.id);
+    let bedrock_url = format!("http://localhost:{}/_bedrock/{}", port, session.id);
     let requests_href = format!("/_dashboard/sessions/{}/requests", session.id);
     let edit_href = format!("/_dashboard/sessions/{}/edit", session.id);
 
@@ -32,6 +33,10 @@ pub fn render_session_show(session: &Session, port: u16) -> String {
             <tr>
                 <td>"Proxy URL"</td>
                 <td>{proxy_url}</td>
+            </tr>
+            <tr>
+                <td>"Bedrock URL"</td>
+                <td>{bedrock_url}</td>
             </tr>
             <tr>
                 <td>"Target"</td>

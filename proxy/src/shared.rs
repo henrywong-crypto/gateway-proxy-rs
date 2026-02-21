@@ -1,0 +1,318 @@
+use actix_web::error::{ErrorBadGateway, ErrorInternalServerError, ErrorNotFound};
+use actix_web::http::StatusCode;
+use actix_web::HttpResponseBuilder;
+use common::truncate::truncate_strings;
+use serde_json::Value;
+use sqlx::SqlitePool;
+use std::sync::LazyLock;
+
+use crate::sse;
+
+/// Look up a session by ID, returning an actix error on failure or not-found.
+pub async fn get_session_or_error(
+    pool: &SqlitePool,
+    session_id: &str,
+) -> Result<common::models::Session, actix_web::Error> {
+    match db::get_session(pool, session_id).await {
+        Ok(Some(s)) => Ok(s),
+        Ok(None) => Err(ErrorNotFound(format!(
+            "Session '{}' not found",
+            session_id
+        ))),
+        Err(e) => Err(ErrorInternalServerError(format!("DB error: {}", e))),
+    }
+}
+
+/// Serialize an iterator of (name, value) header pairs to a pretty-printed JSON string.
+pub fn headers_to_json(
+    headers: impl Iterator<Item = (String, String)>,
+) -> Option<String> {
+    let map: std::collections::HashMap<String, String> = headers.collect();
+    serde_json::to_string_pretty(&map).ok()
+}
+
+/// Fields extracted from a JSON request body.
+#[derive(Default)]
+pub struct ParsedRequestBody {
+    pub body_json: Option<String>,
+    pub truncated_json: Option<String>,
+    pub model: Option<String>,
+    pub tools_json: Option<String>,
+    pub messages_json: Option<String>,
+    pub system_json: Option<String>,
+    pub params_json: Option<String>,
+}
+
+/// Extract common fields (model, tools, messages, system, params, truncated body)
+/// from a parsed JSON value. If `model_override` is provided, it is used only when
+/// the body does not already contain a "model" field.
+pub fn extract_request_fields(
+    data: &Value,
+    model_override: Option<String>,
+) -> ParsedRequestBody {
+    let truncated = truncate_strings(data, 100);
+
+    let model = data
+        .get("model")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .or(model_override);
+
+    let tools_json = data
+        .get("tools")
+        .filter(|v| v.is_array())
+        .and_then(|v| serde_json::to_string(v).ok());
+
+    let messages_json = data
+        .get("messages")
+        .filter(|v| v.is_array())
+        .and_then(|v| serde_json::to_string(v).ok());
+
+    let system_json = data
+        .get("system")
+        .and_then(|v| serde_json::to_string_pretty(v).ok());
+
+    let other: serde_json::Map<String, Value> = data
+        .as_object()
+        .map(|obj| {
+            obj.iter()
+                .filter(|(k, _)| !matches!(k.as_str(), "tools" | "messages" | "system"))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let params_json = if other.is_empty() {
+        None
+    } else {
+        serde_json::to_string_pretty(&Value::Object(other)).ok()
+    };
+
+    ParsedRequestBody {
+        body_json: serde_json::to_string_pretty(data).ok(),
+        truncated_json: serde_json::to_string_pretty(&truncated).ok(),
+        model,
+        tools_json,
+        messages_json,
+        system_json,
+        params_json,
+    }
+}
+
+/// Metadata for a request log entry (everything except the parsed body fields).
+pub struct RequestMeta<'a> {
+    pub pool: &'a SqlitePool,
+    pub session_id: &'a str,
+    pub method: &'a str,
+    pub path: &'a str,
+    pub timestamp: &'a str,
+    pub headers_json: Option<&'a str>,
+    pub note: Option<&'a str>,
+}
+
+/// Insert a request record into the DB. Returns the request ID on success, None on failure.
+pub async fn log_request(meta: &RequestMeta<'_>, fields: &ParsedRequestBody) -> Option<String> {
+    match db::insert_request(
+        meta.pool,
+        &db::InsertRequestParams {
+            session_id: meta.session_id,
+            method: meta.method,
+            path: meta.path,
+            timestamp: meta.timestamp,
+            headers_json: meta.headers_json,
+            body_json: fields.body_json.as_deref(),
+            truncated_json: fields.truncated_json.as_deref(),
+            model: fields.model.as_deref(),
+            tools_json: fields.tools_json.as_deref(),
+            messages_json: fields.messages_json.as_deref(),
+            system_json: fields.system_json.as_deref(),
+            params_json: fields.params_json.as_deref(),
+            note: meta.note,
+        },
+    )
+    .await
+    {
+        Ok(id) => Some(id),
+        Err(e) => {
+            eprintln!("Failed to insert request: {}", e);
+            None
+        }
+    }
+}
+
+/// Store a buffered response (with optional SSE event parsing) into the DB.
+pub async fn store_response(
+    pool: &SqlitePool,
+    request_id: &str,
+    status: u16,
+    resp_headers_json: Option<&str>,
+    response_body: &str,
+    is_sse: bool,
+) {
+    let events_json = if is_sse {
+        let events = sse::parse_sse_events(response_body);
+        serde_json::to_string(&events).ok()
+    } else {
+        None
+    };
+
+    if let Err(e) = db::update_request_response(
+        pool,
+        request_id,
+        status as i64,
+        resp_headers_json,
+        Some(response_body),
+        events_json.as_deref(),
+    )
+    .await
+    {
+        eprintln!("Failed to update request response: {}", e);
+    }
+}
+
+/// Check if the upstream response Content-Type indicates SSE.
+pub fn is_sse_content_type(headers: &reqwest::header::HeaderMap) -> bool {
+    headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .map(|ct| ct.contains("text/event-stream"))
+        .unwrap_or(false)
+}
+
+/// Convert a u16 status code to an actix StatusCode.
+pub fn to_actix_status(status: u16) -> Result<StatusCode, actix_web::Error> {
+    StatusCode::from_u16(status)
+        .map_err(|_| ErrorBadGateway(format!("Invalid status code from upstream: {}", status)))
+}
+
+/// Copy upstream response headers into an actix HttpResponseBuilder,
+/// skipping transfer-encoding and content-encoding.
+pub fn forward_response_headers(
+    builder: &mut HttpResponseBuilder,
+    upstream_headers: &reqwest::header::HeaderMap,
+) {
+    for (key, value) in upstream_headers {
+        let k = key.as_str().to_lowercase();
+        if k == "transfer-encoding" || k == "content-encoding" {
+            continue;
+        }
+        if let Ok(name) = actix_web::http::header::HeaderName::from_bytes(key.as_ref()) {
+            if let Ok(val) = actix_web::http::header::HeaderValue::from_bytes(value.as_bytes()) {
+                builder.insert_header((name, val));
+            }
+        }
+    }
+}
+
+/// Cached insecure reqwest::Client for sessions with TLS verification disabled.
+static INSECURE_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .danger_accept_invalid_certs(true)
+        .build()
+        .expect("Failed to build TLS-insecure client")
+});
+
+/// Return the insecure client if the session has TLS verification disabled,
+/// otherwise return the default client reference.
+pub fn effective_client<'a>(
+    session: &common::models::Session,
+    default_client: &'a reqwest::Client,
+) -> &'a reqwest::Client {
+    if session.tls_verify_disabled {
+        &INSECURE_CLIENT
+    } else {
+        default_client
+    }
+}
+
+/// Extract header (name, value) pairs from an actix HttpRequest.
+pub fn actix_headers_iter(
+    req: &actix_web::HttpRequest,
+) -> impl Iterator<Item = (String, String)> + '_ {
+    req.headers().iter().filter_map(|(k, v)| {
+        v.to_str()
+            .ok()
+            .map(|s| (k.to_string(), s.to_string()))
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_basic_fields() {
+        let data: Value = serde_json::json!({
+            "model": "claude-3-opus",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"name": "search"}],
+            "system": "You are helpful.",
+            "max_tokens": 1024
+        });
+        let fields = extract_request_fields(&data, None);
+        assert_eq!(fields.model.as_deref(), Some("claude-3-opus"));
+        assert!(fields.messages_json.is_some());
+        assert!(fields.tools_json.is_some());
+        assert!(fields.system_json.is_some());
+        assert!(fields.params_json.is_some());
+        // params should contain max_tokens and model but not messages/tools/system
+        let params: Value = serde_json::from_str(fields.params_json.as_ref().unwrap()).unwrap();
+        assert!(params.get("max_tokens").is_some());
+        assert!(params.get("messages").is_none());
+    }
+
+    #[test]
+    fn extract_model_override_used_as_fallback() {
+        let data: Value = serde_json::json!({"messages": []});
+        let fields = extract_request_fields(&data, Some("fallback-model".to_string()));
+        assert_eq!(fields.model.as_deref(), Some("fallback-model"));
+    }
+
+    #[test]
+    fn extract_body_model_takes_precedence_over_override() {
+        let data: Value = serde_json::json!({"model": "body-model", "messages": []});
+        let fields = extract_request_fields(&data, Some("override-model".to_string()));
+        assert_eq!(fields.model.as_deref(), Some("body-model"));
+    }
+
+    #[test]
+    fn is_sse_content_type_positive() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("content-type", "text/event-stream".parse().unwrap());
+        assert!(is_sse_content_type(&headers));
+    }
+
+    #[test]
+    fn is_sse_content_type_negative() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("content-type", "application/json".parse().unwrap());
+        assert!(!is_sse_content_type(&headers));
+    }
+
+    #[test]
+    fn is_sse_content_type_missing() {
+        let headers = reqwest::header::HeaderMap::new();
+        assert!(!is_sse_content_type(&headers));
+    }
+
+    #[test]
+    fn headers_to_json_basic() {
+        let headers = vec![
+            ("content-type".to_string(), "application/json".to_string()),
+            ("x-custom".to_string(), "value".to_string()),
+        ];
+        let json = headers_to_json(headers.into_iter()).unwrap();
+        let parsed: std::collections::HashMap<String, String> =
+            serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.get("content-type").unwrap(), "application/json");
+        assert_eq!(parsed.get("x-custom").unwrap(), "value");
+    }
+
+    #[test]
+    fn headers_to_json_empty() {
+        let json = headers_to_json(std::iter::empty()).unwrap();
+        let parsed: std::collections::HashMap<String, String> =
+            serde_json::from_str(&json).unwrap();
+        assert!(parsed.is_empty());
+    }
+}

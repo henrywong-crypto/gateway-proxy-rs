@@ -50,3 +50,62 @@ pub fn parse_sse_events(body: &str) -> Vec<serde_json::Value> {
 
     events
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn single_json_event() {
+        let body = "event: message_start\ndata: {\"type\":\"message_start\"}\n\n";
+        let events = parse_sse_events(body);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["event"], "message_start");
+        assert!(events[0]["data"].is_object());
+        assert_eq!(events[0]["data"]["type"], "message_start");
+    }
+
+    #[test]
+    fn non_json_data() {
+        let body = "event: ping\ndata: just a string\n\n";
+        let events = parse_sse_events(body);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["data"], "just a string");
+    }
+
+    #[test]
+    fn multiple_events() {
+        let body = "event: a\ndata: {\"x\":1}\n\nevent: b\ndata: {\"x\":2}\n\n";
+        let events = parse_sse_events(body);
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0]["event"], "a");
+        assert_eq!(events[0]["data"]["x"], 1);
+        assert_eq!(events[1]["event"], "b");
+        assert_eq!(events[1]["data"]["x"], 2);
+    }
+
+    #[test]
+    fn trailing_event_without_blank_line() {
+        let body = "event: last\ndata: {\"done\":true}";
+        let events = parse_sse_events(body);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["event"], "last");
+        assert_eq!(events[0]["data"]["done"], true);
+    }
+
+    #[test]
+    fn empty_input() {
+        let events = parse_sse_events("");
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn data_only_no_event_field() {
+        let body = "data: hello\n\n";
+        let events = parse_sse_events(body);
+        assert_eq!(events.len(), 1);
+        // No "event" key should be present
+        assert!(events[0].get("event").is_none());
+        assert_eq!(events[0]["data"], "hello");
+    }
+}

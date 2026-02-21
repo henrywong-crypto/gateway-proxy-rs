@@ -100,6 +100,10 @@ async fn main() -> anyhow::Result<()> {
                 "/_proxy/{session_id}/{tail:.*}",
                 web::to(handlers::proxy_catch_all),
             )
+            .route(
+                "/_bedrock/{session_id}/model/{model_id}/invoke-with-response-stream",
+                web::post().to(handlers::bedrock_invoke),
+            )
     })
     .bind(("0.0.0.0", port))?
     .run()
