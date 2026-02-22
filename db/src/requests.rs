@@ -2,7 +2,6 @@ use sqlx::sqlite::SqlitePool;
 
 use common::models::ProxyRequest;
 
-
 pub struct InsertRequestParams<'a> {
     pub session_id: &'a str,
     pub method: &'a str,

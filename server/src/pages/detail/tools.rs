@@ -18,7 +18,11 @@ pub fn render_tools(json_str: &str, filters: &[String]) -> String {
             .unwrap_or("");
 
         let filtered = filters.iter().any(|f| f == name);
-        let row_class = if filtered { " class=\"filtered-row\"" } else { "" };
+        let row_class = if filtered {
+            " class=\"filtered-row\""
+        } else {
+            ""
+        };
 
         let mut params_html = String::new();
         if let Some(schema) = tool.get("input_schema").and_then(|s| s.as_object()) {

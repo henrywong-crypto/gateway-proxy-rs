@@ -38,11 +38,24 @@ pub async fn create_session(
     let tls_verify_disabled = form.get("tls_verify_disabled").is_some_and(|v| v == "1");
     let auth_header = form.get("auth_header").and_then(|v| {
         let trimmed = v.trim();
-        if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
     });
 
     let id = Uuid::new_v4();
-    match db::create_session(pool.get_ref(), &id.to_string(), &name, &target_url, tls_verify_disabled, auth_header.as_deref()).await {
+    match db::create_session(
+        pool.get_ref(),
+        &id.to_string(),
+        &name,
+        &target_url,
+        tls_verify_disabled,
+        auth_header.as_deref(),
+    )
+    .await
+    {
         Ok(()) => HttpResponse::SeeOther()
             .insert_header(("Location", format!("/_dashboard/sessions/{}", id)))
             .finish(),
@@ -220,7 +233,11 @@ pub async fn update_session(
     let tls_verify_disabled = form.get("tls_verify_disabled").is_some_and(|v| v == "1");
     let auth_header = form.get("auth_header").and_then(|v| {
         let trimmed = v.trim();
-        if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
     });
 
     match db::update_session(
@@ -292,7 +309,8 @@ pub async fn filter_profile_show(
     let tool_count = db::count_tool_filters(pool.get_ref(), &profile_id)
         .await
         .unwrap_or(0);
-    let html = pages::filters::render_profile_show(&profile, &active_profile_id, system_count, tool_count);
+    let html =
+        pages::filters::render_profile_show(&profile, &active_profile_id, system_count, tool_count);
     HttpResponse::Ok().content_type("text/html").body(html)
 }
 
@@ -399,7 +417,10 @@ pub async fn filter_profile_system_post(
     }
 
     HttpResponse::SeeOther()
-        .insert_header(("Location", format!("/_dashboard/filters/{}/system", profile_id)))
+        .insert_header((
+            "Location",
+            format!("/_dashboard/filters/{}/system", profile_id),
+        ))
         .finish()
 }
 
@@ -417,7 +438,10 @@ pub async fn system_filter_edit_post(
     }
 
     HttpResponse::SeeOther()
-        .insert_header(("Location", format!("/_dashboard/filters/{}/system", profile_id)))
+        .insert_header((
+            "Location",
+            format!("/_dashboard/filters/{}/system", profile_id),
+        ))
         .finish()
 }
 
@@ -428,7 +452,10 @@ pub async fn system_filter_delete(
     let (profile_id, filter_id) = path.into_inner();
     let _ = db::delete_system_filter(pool.get_ref(), &filter_id).await;
     HttpResponse::SeeOther()
-        .insert_header(("Location", format!("/_dashboard/filters/{}/system", profile_id)))
+        .insert_header((
+            "Location",
+            format!("/_dashboard/filters/{}/system", profile_id),
+        ))
         .finish()
 }
 
@@ -518,7 +545,10 @@ pub async fn filter_profile_tools_post(
     }
 
     HttpResponse::SeeOther()
-        .insert_header(("Location", format!("/_dashboard/filters/{}/tools", profile_id)))
+        .insert_header((
+            "Location",
+            format!("/_dashboard/filters/{}/tools", profile_id),
+        ))
         .finish()
 }
 
@@ -538,7 +568,10 @@ pub async fn tool_filter_edit_post(
     }
 
     HttpResponse::SeeOther()
-        .insert_header(("Location", format!("/_dashboard/filters/{}/tools", profile_id)))
+        .insert_header((
+            "Location",
+            format!("/_dashboard/filters/{}/tools", profile_id),
+        ))
         .finish()
 }
 
@@ -551,7 +584,10 @@ pub async fn tool_filter_delete(
         let _ = db::delete_tool_filter(pool.get_ref(), uuid).await;
     }
     HttpResponse::SeeOther()
-        .insert_header(("Location", format!("/_dashboard/filters/{}/tools", profile_id)))
+        .insert_header((
+            "Location",
+            format!("/_dashboard/filters/{}/tools", profile_id),
+        ))
         .finish()
 }
 

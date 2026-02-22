@@ -8,7 +8,11 @@ fn matched_filter<'a>(text: &str, filters: &'a [String]) -> Option<&'a str> {
             Ok(re) => re.is_match(text),
             Err(_) => text.contains(f.as_str()),
         };
-        if matched { Some(f.as_str()) } else { None }
+        if matched {
+            Some(f.as_str())
+        } else {
+            None
+        }
     })
 }
 
@@ -30,7 +34,11 @@ pub fn render_system(json_str: &str, filters: &[String]) -> String {
 
     if let Some(s) = val.as_str() {
         let filter_match = matched_filter(s, filters);
-        let row_class = if filter_match.is_some() { " class=\"filtered-row\"" } else { "" };
+        let row_class = if filter_match.is_some() {
+            " class=\"filtered-row\""
+        } else {
+            ""
+        };
         return format!(
             "<table><tr><th>Type</th><th>Content</th></tr><tr{}><td>text</td><td>{}</td></tr></table>",
             row_class,
@@ -51,7 +59,11 @@ pub fn render_system(json_str: &str, filters: &[String]) -> String {
                 text
             };
             let filter_match = matched_filter(text, filters);
-            let row_class = if filter_match.is_some() { " class=\"filtered-row\"" } else { "" };
+            let row_class = if filter_match.is_some() {
+                " class=\"filtered-row\""
+            } else {
+                ""
+            };
             let cache_info = block
                 .get("cache_control")
                 .and_then(|c| c.get("type"))

@@ -4,10 +4,7 @@ use leptos::prelude::*;
 use crate::pages::page_layout;
 use common::models::{FilterProfile, SystemFilter, ToolFilter};
 
-pub fn render_filters_index(
-    profiles: &[FilterProfile],
-    active_profile_id: &str,
-) -> String {
+pub fn render_filters_index(profiles: &[FilterProfile], active_profile_id: &str) -> String {
     let profiles = profiles.to_vec();
     let empty = profiles.is_empty();
     let total = profiles.len();
@@ -60,7 +57,7 @@ pub fn render_filters_index(
                                             " "
                                         })
                                     } else {
-                                        Either::Right(view! {})
+                                        Either::Right(())
                                     }}
                                     <form method="POST" action={delete_action}>
                                         <button type="submit">"Delete"</button>
@@ -171,7 +168,7 @@ pub fn render_profile_show(
                 </form>
             })
         } else {
-            Either::Right(view! {})
+            Either::Right(())
         }}
     };
     page_layout(
@@ -220,10 +217,7 @@ pub fn render_profile_edit(profile: &FilterProfile) -> String {
     )
 }
 
-pub fn render_profile_system(
-    profile: &FilterProfile,
-    system_filters: &[SystemFilter],
-) -> String {
+pub fn render_profile_system(profile: &FilterProfile, system_filters: &[SystemFilter]) -> String {
     let profile = profile.clone();
     let profile_name = profile.name.clone();
     let profile_id = profile.id.to_string();
@@ -360,7 +354,7 @@ pub fn render_profile_system_new(
                 </table>
             })
         } else {
-            Either::Right(view! {})
+            Either::Right(())
         }}
     };
     page_layout(
@@ -369,10 +363,7 @@ pub fn render_profile_system_new(
     )
 }
 
-pub fn render_profile_tools(
-    profile: &FilterProfile,
-    tool_filters: &[ToolFilter],
-) -> String {
+pub fn render_profile_tools(profile: &FilterProfile, tool_filters: &[ToolFilter]) -> String {
     let profile = profile.clone();
     let profile_name = profile.name.clone();
     let profile_id = profile.id.to_string();
@@ -441,10 +432,7 @@ pub fn render_profile_tools(
     )
 }
 
-pub fn render_profile_tools_new(
-    profile: &FilterProfile,
-    tool_filters: &[ToolFilter],
-) -> String {
+pub fn render_profile_tools_new(profile: &FilterProfile, tool_filters: &[ToolFilter]) -> String {
     let profile = profile.clone();
     let profile_name = profile.name.clone();
     let profile_id = profile.id.to_string();
@@ -509,7 +497,7 @@ pub fn render_profile_tools_new(
                 </table>
             })
         } else {
-            Either::Right(view! {})
+            Either::Right(())
         }}
     };
     page_layout(
@@ -518,16 +506,16 @@ pub fn render_profile_tools_new(
     )
 }
 
-pub fn render_system_filter_edit(
-    profile: &FilterProfile,
-    filter: &SystemFilter,
-) -> String {
+pub fn render_system_filter_edit(profile: &FilterProfile, filter: &SystemFilter) -> String {
     let profile_name = profile.name.clone();
     let profile_id = profile.id.to_string();
     let filter_id = filter.id.to_string();
     let profile_href = format!("/_dashboard/filters/{}", profile_id);
     let system_href = format!("/_dashboard/filters/{}/system", profile_id);
-    let edit_action = format!("/_dashboard/filters/{}/system/{}/edit", profile_id, filter_id);
+    let edit_action = format!(
+        "/_dashboard/filters/{}/system/{}/edit",
+        profile_id, filter_id
+    );
 
     let body = view! {
         <h1>
@@ -559,22 +547,19 @@ pub fn render_system_filter_edit(
             </table>
         </form>
     };
-    page_layout(
-        &format!("Gateway Proxy - Edit System Filter"),
-        body.to_html(),
-    )
+    page_layout("Gateway Proxy - Edit System Filter", body.to_html())
 }
 
-pub fn render_tool_filter_edit(
-    profile: &FilterProfile,
-    filter: &ToolFilter,
-) -> String {
+pub fn render_tool_filter_edit(profile: &FilterProfile, filter: &ToolFilter) -> String {
     let profile_name = profile.name.clone();
     let profile_id = profile.id.to_string();
     let filter_id = filter.id.to_string();
     let profile_href = format!("/_dashboard/filters/{}", profile_id);
     let tools_href = format!("/_dashboard/filters/{}/tools", profile_id);
-    let edit_action = format!("/_dashboard/filters/{}/tools/{}/edit", profile_id, filter_id);
+    let edit_action = format!(
+        "/_dashboard/filters/{}/tools/{}/edit",
+        profile_id, filter_id
+    );
 
     let body = view! {
         <h1>
@@ -606,8 +591,5 @@ pub fn render_tool_filter_edit(
             </table>
         </form>
     };
-    page_layout(
-        &format!("Gateway Proxy - Edit Tool Filter"),
-        body.to_html(),
-    )
+    page_layout("Gateway Proxy - Edit Tool Filter", body.to_html())
 }

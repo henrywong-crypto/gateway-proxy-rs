@@ -30,14 +30,6 @@ pub async fn create_profile(pool: &SqlitePool, name: &str) -> anyhow::Result<uui
 }
 
 pub async fn delete_profile(pool: &SqlitePool, id: &str) -> anyhow::Result<()> {
-    sqlx::query("DELETE FROM system_filters WHERE profile_id = ?")
-        .bind(id)
-        .execute(pool)
-        .await?;
-    sqlx::query("DELETE FROM tool_filters WHERE profile_id = ?")
-        .bind(id)
-        .execute(pool)
-        .await?;
     sqlx::query("DELETE FROM filter_profiles WHERE id = ?")
         .bind(id)
         .execute(pool)
@@ -63,7 +55,10 @@ pub async fn get_profile(pool: &SqlitePool, id: &str) -> anyhow::Result<Option<F
     .await?)
 }
 
-pub async fn get_profile_by_name(pool: &SqlitePool, name: &str) -> anyhow::Result<Option<FilterProfile>> {
+pub async fn get_profile_by_name(
+    pool: &SqlitePool,
+    name: &str,
+) -> anyhow::Result<Option<FilterProfile>> {
     Ok(sqlx::query_as::<_, FilterProfile>(
         "SELECT id, name, created_at FROM filter_profiles WHERE name = ?",
     )
@@ -73,33 +68,28 @@ pub async fn get_profile_by_name(pool: &SqlitePool, name: &str) -> anyhow::Resul
 }
 
 pub async fn count_system_filters(pool: &SqlitePool, profile_id: &str) -> anyhow::Result<i64> {
-    let row: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM system_filters WHERE profile_id = ?",
-    )
-    .bind(profile_id)
-    .fetch_one(pool)
-    .await?;
+    let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM system_filters WHERE profile_id = ?")
+        .bind(profile_id)
+        .fetch_one(pool)
+        .await?;
     Ok(row.0)
 }
 
 pub async fn count_tool_filters(pool: &SqlitePool, profile_id: &str) -> anyhow::Result<i64> {
-    let row: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM tool_filters WHERE profile_id = ?",
-    )
-    .bind(profile_id)
-    .fetch_one(pool)
-    .await?;
+    let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM tool_filters WHERE profile_id = ?")
+        .bind(profile_id)
+        .fetch_one(pool)
+        .await?;
     Ok(row.0)
 }
 
 // -- Settings --
 
 pub async fn get_setting(pool: &SqlitePool, key: &str) -> anyhow::Result<Option<String>> {
-    let row: Option<(String,)> =
-        sqlx::query_as("SELECT value FROM settings WHERE key = ?")
-            .bind(key)
-            .fetch_optional(pool)
-            .await?;
+    let row: Option<(String,)> = sqlx::query_as("SELECT value FROM settings WHERE key = ?")
+        .bind(key)
+        .fetch_optional(pool)
+        .await?;
     Ok(row.map(|r| r.0))
 }
 
@@ -202,7 +192,10 @@ pub const DEFAULT_FILTER_SUGGESTIONS: &[&str] = &[
     "^You are Claude Code, Anthropic's official CLI for Claude.$",
 ];
 
-pub async fn get_system_filter(pool: &SqlitePool, id: &str) -> anyhow::Result<Option<SystemFilter>> {
+pub async fn get_system_filter(
+    pool: &SqlitePool,
+    id: &str,
+) -> anyhow::Result<Option<SystemFilter>> {
     Ok(sqlx::query_as::<_, SystemFilter>(
         "SELECT id, profile_id, pattern, created_at FROM system_filters WHERE id = ?",
     )

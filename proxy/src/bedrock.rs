@@ -6,11 +6,10 @@ use futures::StreamExt;
 use sqlx::SqlitePool;
 
 use crate::shared::{
-    effective_client, extract_request_fields, forward_response_headers,
-    get_session_or_error, headers_to_json, is_sse_content_type, log_request, store_response,
-    to_actix_status, actix_headers_iter, RequestMeta,
+    actix_headers_iter, effective_client, extract_request_fields, get_session_or_error,
+    headers_to_json, log_request, to_actix_status, RequestMeta,
 };
-use crate::sse;
+use crate::sse::parse_sse_events;
 
 // --- AWS Event Stream binary protocol encoding ---
 
@@ -97,8 +96,7 @@ impl SseParser {
                     events.push(self.current_data.join("\n"));
                     self.current_data.clear();
                 }
-            } else if line.starts_with("data:") {
-                let rest = &line["data:".len()..];
+            } else if let Some(rest) = line.strip_prefix("data:") {
                 let data = rest.strip_prefix(' ').unwrap_or(rest);
                 self.current_data.push(data.to_string());
             }
@@ -165,8 +163,9 @@ fn translate_bedrock_request(
     );
     obj.insert("stream".to_string(), serde_json::Value::Bool(true));
 
-    let body = serde_json::to_vec(&data)
-        .map_err(|e| ErrorInternalServerError(format!("Failed to serialize translated body: {}", e)))?;
+    let body = serde_json::to_vec(&data).map_err(|e| {
+        ErrorInternalServerError(format!("Failed to serialize translated body: {}", e))
+    })?;
 
     // Build headers
     let mut headers = reqwest::header::HeaderMap::new();
@@ -192,53 +191,11 @@ fn translate_bedrock_request(
     }
     if let Some(auth_value) = auth_header {
         if let Ok(val) = reqwest::header::HeaderValue::from_str(auth_value) {
-            headers.insert(
-                reqwest::header::HeaderName::from_static("x-api-key"),
-                val,
-            );
+            headers.insert(reqwest::header::HeaderName::from_static("x-api-key"), val);
         }
     }
 
     Ok((body, headers))
-}
-
-/// Handle a non-streaming upstream response: log warnings for errors, store
-/// in DB, and return the actix response.
-async fn handle_non_streaming_response(
-    upstream: reqwest::Response,
-    status: u16,
-    actix_status: actix_web::http::StatusCode,
-    session_name: &str,
-    stored_path: &str,
-    request_id: &Option<String>,
-    pool: &SqlitePool,
-    resp_headers_json: Option<&str>,
-) -> Result<HttpResponse, actix_web::Error> {
-    let mut builder = HttpResponse::build(actix_status);
-    forward_response_headers(&mut builder, upstream.headers());
-
-    let response_body = upstream
-        .bytes()
-        .await
-        .map_err(|e| ErrorBadGateway(format!("Failed to read upstream response body: {}", e)))?;
-
-    if status >= 400 {
-        let body_preview = String::from_utf8_lossy(&response_body);
-        log::warn!(
-            "{} POST {} -> {} {}",
-            session_name,
-            stored_path,
-            status,
-            &body_preview[..body_preview.len().min(500)],
-        );
-    }
-
-    if let Some(ref req_id) = request_id {
-        let body_str = String::from_utf8_lossy(&response_body);
-        store_response(pool, req_id, status, resp_headers_json, &body_str, false).await;
-    }
-
-    Ok(builder.body(response_body.to_vec()))
 }
 
 pub async fn bedrock_streaming_handler(
@@ -259,16 +216,18 @@ pub async fn bedrock_streaming_handler(
     let session = get_session_or_error(pool.get_ref(), session_id).await?;
 
     // Parse and log the original request
-    let original_data: serde_json::Value =
-        serde_json::from_slice(&body).map_err(|e| ErrorBadRequest(format!("Invalid JSON body: {}", e)))?;
+    let original_data: serde_json::Value = serde_json::from_slice(&body)
+        .map_err(|e| ErrorBadRequest(format!("Invalid JSON body: {}", e)))?;
     if !original_data.is_object() {
         return Err(ErrorBadRequest("Request body must be a JSON object"));
     }
 
     let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
     let stored_path = format!("/model/{}/invoke-with-response-stream", model_id);
-    let req_headers_json = headers_to_json(actix_headers_iter(&req));
-    let fields = extract_request_fields(&original_data, Some(model_id.to_string()));
+    let req_headers_json =
+        headers_to_json(actix_headers_iter(&req)).map_err(ErrorInternalServerError)?;
+    let fields = extract_request_fields(&original_data, Some(model_id.to_string()))
+        .map_err(ErrorInternalServerError)?;
 
     let request_id = log_request(
         &RequestMeta {
@@ -277,12 +236,13 @@ pub async fn bedrock_streaming_handler(
             method: "POST",
             path: &stored_path,
             timestamp: &timestamp,
-            headers_json: req_headers_json.as_deref(),
+            headers_json: Some(&req_headers_json),
             note: None,
         },
         &fields,
     )
-    .await;
+    .await
+    .map_err(ErrorInternalServerError)?;
 
     // Translate request and send upstream
     let (translated_body, forward_headers) = translate_bedrock_request(
@@ -306,25 +266,14 @@ pub async fn bedrock_streaming_handler(
         .map_err(|e| ErrorBadGateway(format!("Upstream error: {}", e)))?;
 
     let status = upstream.status().as_u16();
-    let resp_headers_json = headers_to_json(upstream.headers().iter().filter_map(|(k, v)| {
-        v.to_str().ok().map(|s| (k.to_string(), s.to_string()))
-    }));
-    let is_sse = is_sse_content_type(upstream.headers());
+    let resp_headers_json = headers_to_json(
+        upstream
+            .headers()
+            .iter()
+            .filter_map(|(k, v)| v.to_str().ok().map(|s| (k.to_string(), s.to_string()))),
+    )
+    .map_err(ErrorInternalServerError)?;
     let actix_status = to_actix_status(status)?;
-
-    if !is_sse {
-        return handle_non_streaming_response(
-            upstream,
-            status,
-            actix_status,
-            &session.name,
-            &stored_path,
-            &request_id,
-            pool.get_ref(),
-            resp_headers_json.as_deref(),
-        )
-        .await;
-    }
 
     // Streaming SSE response — convert to Bedrock Event Stream format
     let mut builder = HttpResponse::build(actix_status);
@@ -373,22 +322,24 @@ pub async fn bedrock_streaming_handler(
         }
 
         // Store accumulated response to DB
-        if let Some(req_id) = request_id_bg {
+        let store: anyhow::Result<()> = async {
             let body_str = String::from_utf8_lossy(&accumulated);
-            let events = sse::parse_sse_events(&body_str);
-            let events_json = serde_json::to_string(&events).ok();
-            if let Err(e) = db::update_request_response(
+            let events = parse_sse_events(&body_str);
+            let events_json = serde_json::to_string(&events)?;
+            db::update_request_response(
                 pool_bg.get_ref(),
-                &req_id,
+                &request_id_bg,
                 status as i64,
-                resp_headers_json_bg.as_deref(),
+                Some(&resp_headers_json_bg),
                 Some(&body_str),
-                events_json.as_deref(),
+                Some(&events_json),
             )
-            .await
-            {
-                eprintln!("Failed to update request response: {}", e);
-            }
+            .await?;
+            Ok(())
+        }
+        .await;
+        if let Err(e) = store {
+            log::error!("Failed to store response: {}", e);
         }
     });
 
@@ -420,9 +371,7 @@ mod tests {
     #[test]
     fn sse_parser_multiple_events() {
         let mut parser = SseParser::new();
-        let events = parser.feed(
-            "event: a\ndata: one\n\nevent: b\ndata: two\n\n",
-        );
+        let events = parser.feed("event: a\ndata: one\n\nevent: b\ndata: two\n\n");
         assert_eq!(events, vec!["one", "two"]);
     }
 
@@ -466,10 +415,7 @@ mod tests {
 
     #[test]
     fn event_stream_message_structure() {
-        let msg = encode_event_stream_message(
-            &[(":message-type", "event")],
-            b"payload",
-        );
+        let msg = encode_event_stream_message(&[(":message-type", "event")], b"payload");
         // Total: 16 (framing) + header_len + payload_len
         // Header: 1 (name_len) + 13 (":message-type") + 1 (type=7) + 2 (value_len) + 5 ("event") = 22
         let expected_headers_len = 22u32;
@@ -484,10 +430,7 @@ mod tests {
 
     #[test]
     fn event_stream_message_crc_verification() {
-        let msg = encode_event_stream_message(
-            &[(":event-type", "chunk")],
-            b"test",
-        );
+        let msg = encode_event_stream_message(&[(":event-type", "chunk")], b"test");
         // Verify prelude CRC
         let prelude_crc = crc32fast::hash(&msg[..8]);
         let stored_prelude_crc = u32::from_be_bytes([msg[8], msg[9], msg[10], msg[11]]);

@@ -15,20 +15,15 @@ pub async fn get_session_or_error(
 ) -> Result<common::models::Session, actix_web::Error> {
     match db::get_session(pool, session_id).await {
         Ok(Some(s)) => Ok(s),
-        Ok(None) => Err(ErrorNotFound(format!(
-            "Session '{}' not found",
-            session_id
-        ))),
+        Ok(None) => Err(ErrorNotFound(format!("Session '{}' not found", session_id))),
         Err(e) => Err(ErrorInternalServerError(format!("DB error: {}", e))),
     }
 }
 
 /// Serialize an iterator of (name, value) header pairs to a pretty-printed JSON string.
-pub fn headers_to_json(
-    headers: impl Iterator<Item = (String, String)>,
-) -> Option<String> {
+pub fn headers_to_json(headers: impl Iterator<Item = (String, String)>) -> anyhow::Result<String> {
     let map: std::collections::HashMap<String, String> = headers.collect();
-    serde_json::to_string_pretty(&map).ok()
+    Ok(serde_json::to_string_pretty(&map)?)
 }
 
 /// Fields extracted from a JSON request body.
@@ -49,7 +44,7 @@ pub struct ParsedRequestBody {
 pub fn extract_request_fields(
     data: &Value,
     model_override: Option<String>,
-) -> ParsedRequestBody {
+) -> anyhow::Result<ParsedRequestBody> {
     let truncated = truncate_strings(data, 100);
 
     let model = data
@@ -61,16 +56,19 @@ pub fn extract_request_fields(
     let tools_json = data
         .get("tools")
         .filter(|v| v.is_array())
-        .and_then(|v| serde_json::to_string(v).ok());
+        .map(serde_json::to_string)
+        .transpose()?;
 
     let messages_json = data
         .get("messages")
         .filter(|v| v.is_array())
-        .and_then(|v| serde_json::to_string(v).ok());
+        .map(serde_json::to_string)
+        .transpose()?;
 
     let system_json = data
         .get("system")
-        .and_then(|v| serde_json::to_string_pretty(v).ok());
+        .map(serde_json::to_string_pretty)
+        .transpose()?;
 
     let other: serde_json::Map<String, Value> = data
         .as_object()
@@ -84,18 +82,18 @@ pub fn extract_request_fields(
     let params_json = if other.is_empty() {
         None
     } else {
-        serde_json::to_string_pretty(&Value::Object(other)).ok()
+        Some(serde_json::to_string_pretty(&Value::Object(other))?)
     };
 
-    ParsedRequestBody {
-        body_json: serde_json::to_string_pretty(data).ok(),
-        truncated_json: serde_json::to_string_pretty(&truncated).ok(),
+    Ok(ParsedRequestBody {
+        body_json: Some(serde_json::to_string_pretty(data)?),
+        truncated_json: Some(serde_json::to_string_pretty(&truncated)?),
         model,
         tools_json,
         messages_json,
         system_json,
         params_json,
-    }
+    })
 }
 
 /// Metadata for a request log entry (everything except the parsed body fields).
@@ -110,8 +108,11 @@ pub struct RequestMeta<'a> {
 }
 
 /// Insert a request record into the DB. Returns the request ID on success, None on failure.
-pub async fn log_request(meta: &RequestMeta<'_>, fields: &ParsedRequestBody) -> Option<String> {
-    match db::insert_request(
+pub async fn log_request(
+    meta: &RequestMeta<'_>,
+    fields: &ParsedRequestBody,
+) -> anyhow::Result<String> {
+    db::insert_request(
         meta.pool,
         &db::InsertRequestParams {
             session_id: meta.session_id,
@@ -130,13 +131,6 @@ pub async fn log_request(meta: &RequestMeta<'_>, fields: &ParsedRequestBody) -> 
         },
     )
     .await
-    {
-        Ok(id) => Some(id),
-        Err(e) => {
-            eprintln!("Failed to insert request: {}", e);
-            None
-        }
-    }
 }
 
 /// Store a buffered response (with optional SSE event parsing) into the DB.
@@ -146,36 +140,20 @@ pub async fn store_response(
     status: u16,
     resp_headers_json: Option<&str>,
     response_body: &str,
-    is_sse: bool,
-) {
-    let events_json = if is_sse {
-        let events = sse::parse_sse_events(response_body);
-        serde_json::to_string(&events).ok()
-    } else {
-        None
-    };
+) -> anyhow::Result<()> {
+    let events = sse::parse_sse_events(response_body);
+    let events_json = serde_json::to_string(&events)?;
 
-    if let Err(e) = db::update_request_response(
+    db::update_request_response(
         pool,
         request_id,
         status as i64,
         resp_headers_json,
         Some(response_body),
-        events_json.as_deref(),
+        Some(&events_json),
     )
-    .await
-    {
-        eprintln!("Failed to update request response: {}", e);
-    }
-}
-
-/// Check if the upstream response Content-Type indicates SSE.
-pub fn is_sse_content_type(headers: &reqwest::header::HeaderMap) -> bool {
-    headers
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .map(|ct| ct.contains("text/event-stream"))
-        .unwrap_or(false)
+    .await?;
+    Ok(())
 }
 
 /// Convert a u16 status code to an actix StatusCode.
@@ -229,11 +207,9 @@ pub fn effective_client<'a>(
 pub fn actix_headers_iter(
     req: &actix_web::HttpRequest,
 ) -> impl Iterator<Item = (String, String)> + '_ {
-    req.headers().iter().filter_map(|(k, v)| {
-        v.to_str()
-            .ok()
-            .map(|s| (k.to_string(), s.to_string()))
-    })
+    req.headers()
+        .iter()
+        .filter_map(|(k, v)| v.to_str().ok().map(|s| (k.to_string(), s.to_string())))
 }
 
 /// Build the full target URL from a session's base URL, the request path, and
@@ -296,16 +272,16 @@ pub fn build_forward_headers(
 pub fn parse_body_fields(
     body: &[u8],
     url_model: Option<String>,
-) -> (ParsedRequestBody, Option<String>) {
+) -> anyhow::Result<(ParsedRequestBody, Option<String>)> {
     if body.is_empty() {
-        (ParsedRequestBody::default(), Some("no body".to_string()))
+        Ok((ParsedRequestBody::default(), Some("no body".to_string())))
     } else if let Ok(data) = serde_json::from_slice::<Value>(body) {
-        (extract_request_fields(&data, url_model), None)
+        Ok((extract_request_fields(&data, url_model)?, None))
     } else {
-        (
+        Ok((
             ParsedRequestBody::default(),
             Some(format!("non-JSON body, {} bytes", body.len())),
-        )
+        ))
     }
 }
 
@@ -322,7 +298,7 @@ mod tests {
             "system": "You are helpful.",
             "max_tokens": 1024
         });
-        let fields = extract_request_fields(&data, None);
+        let fields = extract_request_fields(&data, None).unwrap();
         assert_eq!(fields.model.as_deref(), Some("claude-3-opus"));
         assert!(fields.messages_json.is_some());
         assert!(fields.tools_json.is_some());
@@ -337,35 +313,15 @@ mod tests {
     #[test]
     fn extract_model_override_used_as_fallback() {
         let data: Value = serde_json::json!({"messages": []});
-        let fields = extract_request_fields(&data, Some("fallback-model".to_string()));
+        let fields = extract_request_fields(&data, Some("fallback-model".to_string())).unwrap();
         assert_eq!(fields.model.as_deref(), Some("fallback-model"));
     }
 
     #[test]
     fn extract_body_model_takes_precedence_over_override() {
         let data: Value = serde_json::json!({"model": "body-model", "messages": []});
-        let fields = extract_request_fields(&data, Some("override-model".to_string()));
+        let fields = extract_request_fields(&data, Some("override-model".to_string())).unwrap();
         assert_eq!(fields.model.as_deref(), Some("body-model"));
-    }
-
-    #[test]
-    fn is_sse_content_type_positive() {
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert("content-type", "text/event-stream".parse().unwrap());
-        assert!(is_sse_content_type(&headers));
-    }
-
-    #[test]
-    fn is_sse_content_type_negative() {
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert("content-type", "application/json".parse().unwrap());
-        assert!(!is_sse_content_type(&headers));
-    }
-
-    #[test]
-    fn is_sse_content_type_missing() {
-        let headers = reqwest::header::HeaderMap::new();
-        assert!(!is_sse_content_type(&headers));
     }
 
     #[test]

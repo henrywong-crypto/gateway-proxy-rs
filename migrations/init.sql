@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 CREATE TABLE IF NOT EXISTS requests (
     id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL REFERENCES sessions(id),
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     method TEXT NOT NULL,
     path TEXT NOT NULL,
     timestamp TEXT NOT NULL,
@@ -42,14 +42,14 @@ CREATE TABLE IF NOT EXISTS settings (
 
 CREATE TABLE IF NOT EXISTS system_filters (
     id TEXT PRIMARY KEY,
-    profile_id TEXT NOT NULL REFERENCES filter_profiles(id),
+    profile_id TEXT NOT NULL REFERENCES filter_profiles(id) ON DELETE CASCADE,
     pattern TEXT NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS tool_filters (
     id TEXT PRIMARY KEY,
-    profile_id TEXT NOT NULL REFERENCES filter_profiles(id),
+    profile_id TEXT NOT NULL REFERENCES filter_profiles(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );

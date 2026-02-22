@@ -1,4 +1,5 @@
-use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
+use std::str::FromStr;
 
 mod filters;
 mod requests;
@@ -8,11 +9,12 @@ pub use filters::*;
 pub use requests::*;
 pub use sessions::*;
 
-
 pub async fn init_pool(db_path: &str) -> anyhow::Result<SqlitePool> {
+    let opts = SqliteConnectOptions::from_str(&format!("sqlite:{}?mode=rwc", db_path))?
+        .pragma("foreign_keys", "ON");
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
-        .connect(&format!("sqlite:{}?mode=rwc", db_path))
+        .connect_with(opts)
         .await?;
 
     for stmt in include_str!("../../migrations/init.sql").split(';') {

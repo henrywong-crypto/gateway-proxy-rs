@@ -52,10 +52,6 @@ pub async fn create_session(
 }
 
 pub async fn delete_session(pool: &SqlitePool, session_id: &str) -> anyhow::Result<()> {
-    sqlx::query("DELETE FROM requests WHERE session_id = ?")
-        .bind(session_id)
-        .execute(pool)
-        .await?;
     sqlx::query("DELETE FROM sessions WHERE id = ?")
         .bind(session_id)
         .execute(pool)
