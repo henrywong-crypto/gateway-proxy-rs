@@ -44,6 +44,14 @@ pub async fn create_session(
             Some(trimmed.to_string())
         }
     });
+    let x_api_key = form.get("x_api_key").and_then(|v| {
+        let trimmed = v.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    });
 
     let id = Uuid::new_v4();
     match db::create_session(
@@ -53,6 +61,7 @@ pub async fn create_session(
         &target_url,
         tls_verify_disabled,
         auth_header.as_deref(),
+        x_api_key.as_deref(),
     )
     .await
     {
@@ -254,6 +263,14 @@ pub async fn update_session(
             Some(trimmed.to_string())
         }
     });
+    let x_api_key = form.get("x_api_key").and_then(|v| {
+        let trimmed = v.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    });
 
     match db::update_session(
         pool.get_ref(),
@@ -262,6 +279,7 @@ pub async fn update_session(
         &target_url,
         tls_verify_disabled,
         auth_header.as_deref(),
+        x_api_key.as_deref(),
     )
     .await
     {

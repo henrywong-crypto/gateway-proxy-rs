@@ -8,6 +8,7 @@ pub struct Session {
     pub target_url: String,
     pub tls_verify_disabled: bool,
     pub auth_header: Option<String>,
+    pub x_api_key: Option<String>,
     pub created_at: Option<String>,
     #[sqlx(default)]
     pub request_count: i64,

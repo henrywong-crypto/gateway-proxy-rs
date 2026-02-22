@@ -126,6 +126,7 @@ fn translate_bedrock_request(
     mut data: serde_json::Value,
     model_id: &str,
     auth_header: Option<&str>,
+    x_api_key: Option<&str>,
 ) -> Result<(Vec<u8>, reqwest::header::HeaderMap), actix_web::Error> {
     let obj = data.as_object_mut().unwrap();
 
@@ -191,6 +192,11 @@ fn translate_bedrock_request(
     }
     if let Some(auth_value) = auth_header {
         if let Ok(val) = reqwest::header::HeaderValue::from_str(auth_value) {
+            headers.insert(reqwest::header::AUTHORIZATION, val);
+        }
+    }
+    if let Some(key_value) = x_api_key {
+        if let Ok(val) = reqwest::header::HeaderValue::from_str(key_value) {
             headers.insert(reqwest::header::HeaderName::from_static("x-api-key"), val);
         }
     }
@@ -261,6 +267,7 @@ pub async fn bedrock_streaming_handler(
         filtered_data,
         model_id,
         session.auth_header.as_deref(),
+        session.x_api_key.as_deref(),
     )?;
 
     let target_url = format!("{}/v1/messages", session.target_url.trim_end_matches('/'));

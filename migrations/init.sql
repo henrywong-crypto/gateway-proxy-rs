@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     target_url TEXT NOT NULL,
     tls_verify_disabled INTEGER NOT NULL DEFAULT 0,
     auth_header TEXT,
+    x_api_key TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 

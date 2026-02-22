@@ -95,6 +95,10 @@ pub fn render_new_session() -> String {
                     <td><input type="text" name="auth_header" placeholder="Bearer sk-..." size="60"/></td>
                 </tr>
                 <tr>
+                    <td><label>"X-API-Key Header"</label></td>
+                    <td><input type="text" name="x_api_key" placeholder="sk-..." size="60"/></td>
+                </tr>
+                <tr>
                     <td></td>
                     <td><input type="submit" value="Create"/></td>
                 </tr>
@@ -124,6 +128,7 @@ pub fn render_edit_session(session: &Session, port: u16) -> String {
     let proxy_url = format!("http://localhost:{}/_proxy/{}/", port, session.id);
     let tls_disabled = session.tls_verify_disabled;
     let auth_header_val = session.auth_header.clone().unwrap_or_default();
+    let x_api_key_val = session.x_api_key.clone().unwrap_or_default();
 
     let form = view! {
         <h2>"Edit Session"</h2>
@@ -144,6 +149,10 @@ pub fn render_edit_session(session: &Session, port: u16) -> String {
                 <tr>
                     <td><label>"Authorization Header"</label></td>
                     <td><input type="text" name="auth_header" value={auth_header_val} size="60"/></td>
+                </tr>
+                <tr>
+                    <td><label>"X-API-Key Header"</label></td>
+                    <td><input type="text" name="x_api_key" value={x_api_key_val} size="60"/></td>
                 </tr>
                 <tr>
                     <td></td>

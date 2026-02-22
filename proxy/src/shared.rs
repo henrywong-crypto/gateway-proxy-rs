@@ -275,11 +275,12 @@ pub fn build_stored_path(path: &str, query: Option<&str>) -> String {
 
 /// Copy headers from an actix HttpRequest into a reqwest HeaderMap, skipping
 /// the `Host` header. If `auth_header` is provided, it is injected as the
-/// given `auth_header_name` (e.g. `Authorization` or `x-api-key`).
+/// `Authorization` header. If `x_api_key` is provided, it is injected as
+/// the `x-api-key` header.
 pub fn build_forward_headers(
     req: &HttpRequest,
     auth_header: Option<&str>,
-    auth_header_name: &str,
+    x_api_key: Option<&str>,
 ) -> reqwest::header::HeaderMap {
     let mut map = reqwest::header::HeaderMap::new();
     for (key, value) in req.headers() {
@@ -293,10 +294,13 @@ pub fn build_forward_headers(
         }
     }
     if let Some(auth_value) = auth_header {
-        if let Ok(name) = reqwest::header::HeaderName::from_bytes(auth_header_name.as_bytes()) {
-            if let Ok(val) = reqwest::header::HeaderValue::from_str(auth_value) {
-                map.insert(name, val);
-            }
+        if let Ok(val) = reqwest::header::HeaderValue::from_str(auth_value) {
+            map.insert(reqwest::header::AUTHORIZATION, val);
+        }
+    }
+    if let Some(key_value) = x_api_key {
+        if let Ok(val) = reqwest::header::HeaderValue::from_str(key_value) {
+            map.insert(reqwest::header::HeaderName::from_static("x-api-key"), val);
         }
     }
     map

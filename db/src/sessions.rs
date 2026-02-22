@@ -11,7 +11,7 @@ pub async fn count_sessions(pool: &SqlitePool) -> anyhow::Result<i64> {
 
 pub async fn list_sessions(pool: &SqlitePool) -> anyhow::Result<Vec<Session>> {
     Ok(sqlx::query_as::<_, Session>(
-        "SELECT s.id, s.name, s.target_url, s.tls_verify_disabled, s.auth_header, s.created_at, \
+        "SELECT s.id, s.name, s.target_url, s.tls_verify_disabled, s.auth_header, s.x_api_key, s.created_at, \
          COALESCE((SELECT COUNT(*) FROM requests r WHERE r.session_id = s.id), 0) as request_count \
          FROM sessions s ORDER BY s.created_at DESC",
     )
@@ -21,7 +21,7 @@ pub async fn list_sessions(pool: &SqlitePool) -> anyhow::Result<Vec<Session>> {
 
 pub async fn get_session(pool: &SqlitePool, id: &str) -> anyhow::Result<Option<Session>> {
     Ok(sqlx::query_as::<_, Session>(
-        "SELECT s.id, s.name, s.target_url, s.tls_verify_disabled, s.auth_header, s.created_at, \
+        "SELECT s.id, s.name, s.target_url, s.tls_verify_disabled, s.auth_header, s.x_api_key, s.created_at, \
          COALESCE((SELECT COUNT(*) FROM requests r WHERE r.session_id = s.id), 0) as request_count \
          FROM sessions s WHERE s.id = ?",
     )
@@ -37,15 +37,17 @@ pub async fn create_session(
     target_url: &str,
     tls_verify_disabled: bool,
     auth_header: Option<&str>,
+    x_api_key: Option<&str>,
 ) -> anyhow::Result<()> {
     sqlx::query(
-        "INSERT INTO sessions (id, name, target_url, tls_verify_disabled, auth_header) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO sessions (id, name, target_url, tls_verify_disabled, auth_header, x_api_key) VALUES (?, ?, ?, ?, ?, ?)",
     )
     .bind(id)
     .bind(name)
     .bind(target_url)
     .bind(tls_verify_disabled)
     .bind(auth_header)
+    .bind(x_api_key)
     .execute(pool)
     .await?;
     Ok(())
@@ -66,14 +68,16 @@ pub async fn update_session(
     target_url: &str,
     tls_verify_disabled: bool,
     auth_header: Option<&str>,
+    x_api_key: Option<&str>,
 ) -> anyhow::Result<()> {
     sqlx::query(
-        "UPDATE sessions SET name = ?, target_url = ?, tls_verify_disabled = ?, auth_header = ? WHERE id = ?",
+        "UPDATE sessions SET name = ?, target_url = ?, tls_verify_disabled = ?, auth_header = ?, x_api_key = ? WHERE id = ?",
     )
     .bind(name)
     .bind(target_url)
     .bind(tls_verify_disabled)
     .bind(auth_header)
+    .bind(x_api_key)
     .bind(id)
     .execute(pool)
     .await?;

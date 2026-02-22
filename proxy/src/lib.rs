@@ -86,8 +86,11 @@ pub async fn proxy_handler(
     };
 
     // Forward the request upstream
-    let forward_headers =
-        build_forward_headers(&req, session.auth_header.as_deref(), "authorization");
+    let forward_headers = build_forward_headers(
+        &req,
+        session.auth_header.as_deref(),
+        session.x_api_key.as_deref(),
+    );
     let effective_client = effective_client(&session, client.get_ref());
     let parsed_method = reqwest::Method::from_bytes(method.as_bytes())
         .map_err(|e| ErrorBadRequest(format!("Invalid HTTP method: {}", e)))?;
