@@ -7,11 +7,12 @@ edition = "2021"
 common = { path = "../common" }
 db = { path = "../db" }
 proxy = { path = "../proxy" }
+templates = { path = "../templates" }
 actix-web = "4"
-leptos = { version = "0.7", features = ["ssr"] }
+leptos = { version = "0.8", features = ["ssr"] }
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
 uuid = { version = "1", features = ["v4"] }
-reqwest = { version = "0.12", features = ["rustls-tls"] }
+reqwest = { version = "0.13", features = ["rustls"] }
 serde_json = "1"
 regex = "1"
 clap = { version = "4", features = ["derive"] }

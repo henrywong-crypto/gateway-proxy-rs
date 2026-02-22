@@ -3,6 +3,7 @@ use leptos::prelude::*;
 
 use crate::pages::page_layout;
 use common::models::Session;
+use templates::{Breadcrumb, NavLink, Page};
 
 pub fn render_sessions_index(sessions: &[Session]) -> String {
     let sessions = sessions.to_vec();
@@ -68,18 +69,7 @@ pub fn render_sessions_index(sessions: &[Session]) -> String {
 }
 
 pub fn render_new_session() -> String {
-    let body = view! {
-        <h1>
-            <a href="/_dashboard">"Home"</a>
-            " / "
-            <a href="/_dashboard/sessions">"Sessions"</a>
-            " / "
-            "New Session"
-        </h1>
-        <h2>"Navigation"</h2>
-        <table>
-            <tr><td><a href="javascript:history.back()">"Back"</a></td></tr>
-        </table>
+    let form = view! {
         <h2>"New Session"</h2>
         <form method="POST" action="/_dashboard/sessions/new">
             <table>
@@ -106,7 +96,20 @@ pub fn render_new_session() -> String {
             </table>
         </form>
     };
-    page_layout("Gateway Proxy - New Session", body.to_html())
+
+    Page {
+        title: "Gateway Proxy - New Session".to_string(),
+        breadcrumbs: vec![
+            Breadcrumb::link("Home", "/_dashboard"),
+            Breadcrumb::link("Sessions", "/_dashboard/sessions"),
+            Breadcrumb::current("New Session"),
+        ],
+        nav_links: vec![NavLink::back()],
+        info_rows: vec![],
+        content: form,
+        subpages: vec![],
+    }
+    .render()
 }
 
 pub fn render_edit_session(session: &Session, port: u16) -> String {

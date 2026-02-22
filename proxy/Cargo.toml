@@ -7,7 +7,7 @@ edition = "2021"
 common = { path = "../common" }
 db = { path = "../db" }
 actix-web = "4"
-reqwest = { version = "0.12", features = ["rustls-tls", "stream"] }
+reqwest = { version = "0.13", features = ["rustls", "stream"] }
 futures = "0.3"
 bytes = "1"
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
