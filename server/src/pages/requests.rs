@@ -12,6 +12,7 @@ pub fn render_requests_index(
     let session = session.clone();
     let requests = requests.to_vec();
     let session_name = session.name.clone();
+    let total = requests.len();
 
     let refresh_href = if auto_refresh {
         format!("/_dashboard/sessions/{}/requests?refresh=off", session.id)
@@ -44,6 +45,7 @@ pub fn render_requests_index(
             <tr><td><a href="javascript:history.back()">{"Back"}</a></td></tr>
         </table>
         <h2>"Requests"</h2>
+        <p>{format!("Total: {}", total)}</p>
         <a href={refresh_href}>{refresh_label}</a>
         {if requests.is_empty() {
             Either::Left(view! {
@@ -70,9 +72,10 @@ pub fn render_requests_index(
                         let (msg_count, preview) = get_message_preview(&r);
                         let (block_count, response_summary) = get_response_summary(&r);
                         let model = r.model.clone().unwrap_or_default();
+                        let id_str = r.id.to_string();
                         view! {
                             <tr>
-                                <td><a href={detail_href}>{r.id}</a></td>
+                                <td><a href={detail_href}>{id_str}</a></td>
                                 <td>{r.method}</td>
                                 <td>{r.path}</td>
                                 <td>{model}</td>

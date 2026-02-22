@@ -2,7 +2,6 @@ use sqlx::sqlite::SqlitePool;
 
 use common::models::ProxyRequest;
 
-use crate::generate_id;
 
 pub struct InsertRequestParams<'a> {
     pub session_id: &'a str,
@@ -52,7 +51,7 @@ pub async fn insert_request(
     pool: &SqlitePool,
     params: &InsertRequestParams<'_>,
 ) -> anyhow::Result<String> {
-    let id = generate_id();
+    let id = uuid::Uuid::new_v4().to_string();
     sqlx::query(
         "INSERT INTO requests (id, session_id, method, path, timestamp, headers_json, body_json, \
          truncated_json, model, tools_json, messages_json, system_json, params_json, note) \

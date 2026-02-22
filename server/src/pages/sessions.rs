@@ -7,6 +7,7 @@ use common::models::Session;
 pub fn render_sessions_index(sessions: &[Session]) -> String {
     let sessions = sessions.to_vec();
     let empty = sessions.is_empty();
+    let total = sessions.len();
     let body = view! {
         <h1>
             <a href="/_dashboard">"Home"</a>
@@ -19,6 +20,7 @@ pub fn render_sessions_index(sessions: &[Session]) -> String {
             <tr><td><a href="javascript:history.back()">"Back"</a></td></tr>
         </table>
         <h2>"Sessions"</h2>
+        <p>{format!("Total: {}", total)}</p>
         {if empty {
             Either::Left(view! {
                 <p>"No sessions yet."</p>
@@ -38,9 +40,10 @@ pub fn render_sessions_index(sessions: &[Session]) -> String {
                         let href = format!("/_dashboard/sessions/{}", s.id);
                         let clear_action = format!("/_dashboard/sessions/{}/clear", s.id);
                         let delete_action = format!("/_dashboard/sessions/{}/delete", s.id);
+                        let id_str = s.id.to_string();
                         view! {
                             <tr>
-                                <td><a href={href}>{s.id.clone()}</a></td>
+                                <td><a href={href}>{id_str}</a></td>
                                 <td>{s.name}</td>
                                 <td>{s.target_url}</td>
                                 <td>{s.request_count}</td>
@@ -82,11 +85,11 @@ pub fn render_new_session() -> String {
             <table>
                 <tr>
                     <td><label>"Name"</label></td>
-                    <td><input type="text" name="name" required placeholder="my-session"/></td>
+                    <td><input type="text" name="name" required/></td>
                 </tr>
                 <tr>
                     <td><label>"Target URL"</label></td>
-                    <td><input type="text" name="target_url" required placeholder="https://api.example.com" size="40"/></td>
+                    <td><input type="text" name="target_url" required placeholder="https://api.example.com" size="60"/></td>
                 </tr>
                 <tr>
                     <td><label>"Disable TLS Verify"</label></td>
@@ -94,7 +97,7 @@ pub fn render_new_session() -> String {
                 </tr>
                 <tr>
                     <td><label>"Authorization Header"</label></td>
-                    <td><input type="text" name="auth_header" placeholder="Bearer sk-..." size="40"/></td>
+                    <td><input type="text" name="auth_header" placeholder="Bearer sk-..." size="60"/></td>
                 </tr>
                 <tr>
                     <td></td>
@@ -146,7 +149,7 @@ pub fn render_edit_session(session: &Session, port: u16) -> String {
                 </tr>
                 <tr>
                     <td><label>"Target URL"</label></td>
-                    <td><input type="text" name="target_url" required value={session.target_url} size="40"/></td>
+                    <td><input type="text" name="target_url" required value={session.target_url} size="60"/></td>
                 </tr>
                 <tr>
                     <td><label>"Disable TLS Verify"</label></td>
@@ -154,7 +157,7 @@ pub fn render_edit_session(session: &Session, port: u16) -> String {
                 </tr>
                 <tr>
                     <td><label>"Authorization Header"</label></td>
-                    <td><input type="text" name="auth_header" value={auth_header_val} placeholder="Bearer sk-..." size="40"/></td>
+                    <td><input type="text" name="auth_header" value={auth_header_val} size="60"/></td>
                 </tr>
                 <tr>
                     <td></td>
@@ -162,9 +165,16 @@ pub fn render_edit_session(session: &Session, port: u16) -> String {
                 </tr>
             </table>
         </form>
-        <h2>"Requests"</h2>
+        <h2>"Subpages"</h2>
         <table>
-            <tr><td><a href={requests_href}>"Requests"</a></td></tr>
+            <tr>
+                <th>"Page"</th>
+                <th>"Count"</th>
+            </tr>
+            <tr>
+                <td><a href={requests_href}>"Requests"</a></td>
+                <td>{session.request_count}</td>
+            </tr>
         </table>
     };
 

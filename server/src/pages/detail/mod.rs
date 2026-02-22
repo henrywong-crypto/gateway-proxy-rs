@@ -32,40 +32,98 @@ pub fn render_detail_overview(req: &ProxyRequest, session: &Session) -> String {
     );
     let has_response = req.response_body.is_some() || req.response_events_json.is_some();
 
-    let make_table = |items: Vec<(&str, &str, bool)>| -> String {
-        let rows: String = items
-            .into_iter()
-            .filter(|(_, _, available)| *available)
-            .map(|(key, label, _)| {
-                format!(
-                    r#"<tr><td><a href="{}/{}">{}</a></td></tr>"#,
-                    base,
-                    key,
-                    html_escape(label)
-                )
-            })
-            .collect();
-        format!("<table>{}</table>", rows)
-    };
+    fn json_array_len(json: Option<&str>) -> Option<usize> {
+        json.and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+            .and_then(|v| v.as_array().map(|a| a.len()))
+    }
 
-    let request_links = make_table(vec![
-        ("messages", "Messages", req.messages_json.is_some()),
-        ("system", "System", req.system_json.is_some()),
-        ("tools", "Tools", req.tools_json.is_some()),
-        ("params", "Params", req.params_json.is_some()),
-        ("full_json", "Full JSON", true),
-    ]);
+    fn json_object_len(json: Option<&str>) -> Option<usize> {
+        json.and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+            .and_then(|v| v.as_object().map(|o| o.len()))
+    }
 
-    let headers_links = make_table(vec![
-        ("headers", "Request Headers", true),
-        ("response_headers", "Response Headers", has_response),
-    ]);
+    let subpages: Vec<(&str, &str, bool, String)> = vec![
+        (
+            "messages",
+            "Messages",
+            req.messages_json.is_some(),
+            json_array_len(req.messages_json.as_deref())
+                .map(|n| n.to_string())
+                .unwrap_or_default(),
+        ),
+        (
+            "system",
+            "System",
+            req.system_json.is_some(),
+            json_array_len(req.system_json.as_deref())
+                .map(|n| n.to_string())
+                .unwrap_or_default(),
+        ),
+        (
+            "tools",
+            "Tools",
+            req.tools_json.is_some(),
+            json_array_len(req.tools_json.as_deref())
+                .map(|n| n.to_string())
+                .unwrap_or_default(),
+        ),
+        (
+            "params",
+            "Params",
+            req.params_json.is_some(),
+            json_object_len(req.params_json.as_deref())
+                .map(|n| n.to_string())
+                .unwrap_or_default(),
+        ),
+        ("full_json", "Full JSON", true, String::new()),
+        (
+            "response_sse",
+            "Response SSE",
+            req.response_events_json.is_some(),
+            json_array_len(req.response_events_json.as_deref())
+                .map(|n| n.to_string())
+                .unwrap_or_default(),
+        ),
+        (
+            "headers",
+            "Request Headers",
+            true,
+            json_object_len(req.headers_json.as_deref())
+                .map(|n| n.to_string())
+                .unwrap_or_default(),
+        ),
+        (
+            "response_headers",
+            "Response Headers",
+            has_response,
+            json_object_len(req.response_headers_json.as_deref())
+                .map(|n| n.to_string())
+                .unwrap_or_default(),
+        ),
+    ];
 
-    let response_links = make_table(vec![(
-        "response_sse",
-        "SSE",
-        req.response_events_json.is_some(),
-    )]);
+    let subpages: Vec<_> = subpages
+        .into_iter()
+        .filter(|(_, _, available, _)| *available)
+        .collect();
+
+    let subpages_html: String = subpages
+        .iter()
+        .map(|(key, label, _, count)| {
+            format!(
+                r#"<tr><td><a href="{}/{}">{}</a></td><td>{}</td></tr>"#,
+                base,
+                key,
+                html_escape(label),
+                count,
+            )
+        })
+        .collect();
+
+    let subpages_table = format!(
+        r#"<table><tr><th>Page</th><th>Count</th></tr>{}</table>"#,
+        subpages_html
+    );
 
     let bc = breadcrumb_html(session, &req, None);
 
@@ -82,12 +140,8 @@ pub fn render_detail_overview(req: &ProxyRequest, session: &Session) -> String {
             <tr><td>"Model"</td><td>{model}</td></tr>
             <tr><td>"Time"</td><td>{timestamp}</td></tr>
         </table>
-        <h2>"Request"</h2>
-        <div inner_html={request_links}/>
-        <h2>"Response"</h2>
-        <div inner_html={response_links}/>
-        <h2>"Headers"</h2>
-        <div inner_html={headers_links}/>
+        <h2>"Subpages"</h2>
+        <div inner_html={subpages_table}/>
     };
 
     page_layout(&title, body.to_html())
@@ -162,7 +216,7 @@ pub fn render_detail_page(
         "tools" => req
             .tools_json
             .as_deref()
-            .map(render_tools)
+            .map(|s| render_tools(s, filters))
             .unwrap_or_else(|| "<p>No tools.</p>".to_string()),
         "params" => req
             .params_json
@@ -208,6 +262,29 @@ pub fn render_detail_page(
 
     let bc = breadcrumb_html(session, &req, Some((page, page_label)));
 
+    fn json_count(json: Option<&str>) -> Option<usize> {
+        json.and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+            .and_then(|v| {
+                v.as_array()
+                    .map(|a| a.len())
+                    .or_else(|| v.as_object().map(|o| o.len()))
+            })
+    }
+
+    let total_count = match page {
+        "messages" => json_count(req.messages_json.as_deref()),
+        "system" => json_count(req.system_json.as_deref()),
+        "tools" => json_count(req.tools_json.as_deref()),
+        "params" => json_count(req.params_json.as_deref()),
+        "headers" => json_count(req.headers_json.as_deref()),
+        "response_headers" => json_count(req.response_headers_json.as_deref()),
+        "response_sse" => json_count(req.response_events_json.as_deref()),
+        _ => None,
+    };
+    let total_html = total_count
+        .map(|n| format!("<p>Total: {}</p>", n))
+        .unwrap_or_default();
+
     let body = view! {
         <div inner_html={bc}/>
         <h2>"Navigation"</h2>
@@ -215,6 +292,7 @@ pub fn render_detail_page(
             <tr><td><a href="javascript:history.back()">"Back"</a></td></tr>
         </table>
         <h2>{page_label}</h2>
+        <div inner_html={total_html}/>
         <div inner_html={controls_html}/>
         <div inner_html={content_html}/>
     };

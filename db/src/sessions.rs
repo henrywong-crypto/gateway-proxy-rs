@@ -2,6 +2,13 @@ use sqlx::sqlite::SqlitePool;
 
 use common::models::Session;
 
+pub async fn count_sessions(pool: &SqlitePool) -> anyhow::Result<i64> {
+    let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sessions")
+        .fetch_one(pool)
+        .await?;
+    Ok(row.0)
+}
+
 pub async fn list_sessions(pool: &SqlitePool) -> anyhow::Result<Vec<Session>> {
     Ok(sqlx::query_as::<_, Session>(
         "SELECT s.id, s.name, s.target_url, s.tls_verify_disabled, s.auth_header, s.created_at, \
@@ -14,7 +21,9 @@ pub async fn list_sessions(pool: &SqlitePool) -> anyhow::Result<Vec<Session>> {
 
 pub async fn get_session(pool: &SqlitePool, id: &str) -> anyhow::Result<Option<Session>> {
     Ok(sqlx::query_as::<_, Session>(
-        "SELECT id, name, target_url, tls_verify_disabled, auth_header, created_at FROM sessions WHERE id = ?",
+        "SELECT s.id, s.name, s.target_url, s.tls_verify_disabled, s.auth_header, s.created_at, \
+         COALESCE((SELECT COUNT(*) FROM requests r WHERE r.session_id = s.id), 0) as request_count \
+         FROM sessions s WHERE s.id = ?",
     )
     .bind(id)
     .fetch_optional(pool)

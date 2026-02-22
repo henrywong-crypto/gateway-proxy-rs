@@ -1,6 +1,6 @@
 use crate::pages::{collapsible_block, html_escape};
 
-pub fn render_tools(json_str: &str) -> String {
+pub fn render_tools(json_str: &str, filters: &[String]) -> String {
     let Ok(tools) = serde_json::from_str::<Vec<serde_json::Value>>(json_str) else {
         return format!("<pre>{}</pre>", html_escape(json_str));
     };
@@ -16,6 +16,9 @@ pub fn render_tools(json_str: &str) -> String {
             .get("description")
             .and_then(|d| d.as_str())
             .unwrap_or("");
+
+        let filtered = filters.iter().any(|f| f == name);
+        let row_class = if filtered { " class=\"filtered-row\"" } else { "" };
 
         let mut params_html = String::new();
         if let Some(schema) = tool.get("input_schema").and_then(|s| s.as_object()) {
@@ -49,9 +52,19 @@ pub fn render_tools(json_str: &str) -> String {
             }
         }
 
+        let name_html = if filtered {
+            format!(
+                "{} <span class=\"filtered-badge\">[FILTERED]</span>",
+                html_escape(name)
+            )
+        } else {
+            html_escape(name)
+        };
+
         html.push_str(&format!(
-            "<tr><td>{}</td><td>{}</td><td>{}</td></tr>",
-            html_escape(name),
+            "<tr{}><td>{}</td><td>{}</td><td>{}</td></tr>",
+            row_class,
+            name_html,
             collapsible_block(desc, ""),
             params_html
         ));

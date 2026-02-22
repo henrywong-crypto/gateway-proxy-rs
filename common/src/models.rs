@@ -2,7 +2,8 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Session {
-    pub id: String,
+    #[sqlx(try_from = "String")]
+    pub id: uuid::Uuid,
     pub name: String,
     pub target_url: String,
     pub tls_verify_disabled: bool,
@@ -14,8 +15,10 @@ pub struct Session {
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct ProxyRequest {
-    pub id: String,
-    pub session_id: String,
+    #[sqlx(try_from = "String")]
+    pub id: uuid::Uuid,
+    #[sqlx(try_from = "String")]
+    pub session_id: uuid::Uuid,
     pub method: String,
     pub path: String,
     pub timestamp: String,
@@ -36,8 +39,29 @@ pub struct ProxyRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct FilterProfile {
+    #[sqlx(try_from = "String")]
+    pub id: uuid::Uuid,
+    pub name: String,
+    pub created_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct SystemFilter {
-    pub id: String,
+    #[sqlx(try_from = "String")]
+    pub id: uuid::Uuid,
+    #[sqlx(try_from = "String")]
+    pub profile_id: uuid::Uuid,
     pub pattern: String,
+    pub created_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct ToolFilter {
+    #[sqlx(try_from = "String")]
+    pub id: uuid::Uuid,
+    #[sqlx(try_from = "String")]
+    pub profile_id: uuid::Uuid,
+    pub name: String,
     pub created_at: Option<String>,
 }

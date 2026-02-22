@@ -29,8 +29,27 @@ CREATE TABLE IF NOT EXISTS requests (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS filter_profiles (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS system_filters (
     id TEXT PRIMARY KEY,
+    profile_id TEXT NOT NULL REFERENCES filter_profiles(id),
     pattern TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS tool_filters (
+    id TEXT PRIMARY KEY,
+    profile_id TEXT NOT NULL REFERENCES filter_profiles(id),
+    name TEXT NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );

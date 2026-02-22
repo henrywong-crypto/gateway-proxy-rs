@@ -70,11 +70,83 @@ async fn main() -> anyhow::Result<()> {
             )
             .route(
                 "/_dashboard/filters",
-                web::get().to(handlers::filters_page),
+                web::get().to(handlers::filters_index),
             )
             .route(
-                "/_dashboard/filters",
-                web::post().to(handlers::filters_post),
+                "/_dashboard/filters/new",
+                web::get().to(handlers::filters_new),
+            )
+            .route(
+                "/_dashboard/filters/new",
+                web::post().to(handlers::filters_create),
+            )
+            .route(
+                "/_dashboard/filters/{id}",
+                web::get().to(handlers::filter_profile_show),
+            )
+            .route(
+                "/_dashboard/filters/{id}/edit",
+                web::get().to(handlers::filter_profile_edit),
+            )
+            .route(
+                "/_dashboard/filters/{id}/edit",
+                web::post().to(handlers::filter_profile_update),
+            )
+            .route(
+                "/_dashboard/filters/{id}/activate",
+                web::post().to(handlers::filter_profile_activate),
+            )
+            .route(
+                "/_dashboard/filters/{id}/delete",
+                web::post().to(handlers::filter_profile_delete),
+            )
+            .route(
+                "/_dashboard/filters/{id}/system",
+                web::get().to(handlers::filter_profile_system),
+            )
+            .route(
+                "/_dashboard/filters/{id}/system",
+                web::post().to(handlers::filter_profile_system_post),
+            )
+            .route(
+                "/_dashboard/filters/{id}/system/new",
+                web::get().to(handlers::filter_profile_system_new),
+            )
+            .route(
+                "/_dashboard/filters/{id}/system/{filter_id}/edit",
+                web::get().to(handlers::system_filter_edit),
+            )
+            .route(
+                "/_dashboard/filters/{id}/system/{filter_id}/edit",
+                web::post().to(handlers::system_filter_edit_post),
+            )
+            .route(
+                "/_dashboard/filters/{id}/system/{filter_id}/delete",
+                web::post().to(handlers::system_filter_delete),
+            )
+            .route(
+                "/_dashboard/filters/{id}/tools",
+                web::get().to(handlers::filter_profile_tools),
+            )
+            .route(
+                "/_dashboard/filters/{id}/tools",
+                web::post().to(handlers::filter_profile_tools_post),
+            )
+            .route(
+                "/_dashboard/filters/{id}/tools/new",
+                web::get().to(handlers::filter_profile_tools_new),
+            )
+            .route(
+                "/_dashboard/filters/{id}/tools/{filter_id}/edit",
+                web::get().to(handlers::tool_filter_edit),
+            )
+            .route(
+                "/_dashboard/filters/{id}/tools/{filter_id}/edit",
+                web::post().to(handlers::tool_filter_edit_post),
+            )
+            .route(
+                "/_dashboard/filters/{id}/tools/{filter_id}/delete",
+                web::post().to(handlers::tool_filter_delete),
             )
             .route(
                 "/_dashboard/sessions/{id}/requests",
