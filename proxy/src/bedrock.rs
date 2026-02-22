@@ -295,6 +295,33 @@ pub async fn bedrock_streaming_handler(
     .map_err(ErrorInternalServerError)?;
     let actix_status = to_actix_status(status)?;
 
+    // For non-200 responses, return the error body directly instead of
+    // trying to parse it as SSE (upstream returns plain JSON for errors).
+    if status != 200 {
+        let error_body = upstream
+            .bytes()
+            .await
+            .map_err(|e| ErrorBadGateway(format!("Failed to read error body: {}", e)))?;
+
+        let body_str = String::from_utf8_lossy(&error_body);
+        let events = parse_sse_events(&body_str);
+        let events_json = serde_json::to_string(&events).unwrap_or_else(|_| "[]".to_string());
+
+        let _ = db::update_request_response(
+            pool.get_ref(),
+            &request_id,
+            status as i64,
+            Some(&resp_headers_json),
+            Some(&body_str),
+            Some(&events_json),
+        )
+        .await;
+
+        return Ok(HttpResponse::build(actix_status)
+            .insert_header((actix_web::http::header::CONTENT_TYPE, "application/json"))
+            .body(error_body));
+    }
+
     // Streaming SSE response — convert to Bedrock Event Stream format
     let mut builder = HttpResponse::build(actix_status);
     builder.insert_header((
