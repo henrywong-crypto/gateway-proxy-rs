@@ -13,7 +13,7 @@ pub async fn count_profiles(pool: &SqlitePool) -> anyhow::Result<i64> {
 
 pub async fn list_profiles(pool: &SqlitePool) -> anyhow::Result<Vec<FilterProfile>> {
     Ok(sqlx::query_as::<_, FilterProfile>(
-        "SELECT id, name, created_at FROM filter_profiles ORDER BY created_at ASC",
+        "SELECT id, name, is_default, created_at FROM filter_profiles ORDER BY created_at ASC",
     )
     .fetch_all(pool)
     .await?)
@@ -48,7 +48,7 @@ pub async fn rename_profile(pool: &SqlitePool, id: &str, name: &str) -> anyhow::
 
 pub async fn get_profile(pool: &SqlitePool, id: &str) -> anyhow::Result<Option<FilterProfile>> {
     Ok(sqlx::query_as::<_, FilterProfile>(
-        "SELECT id, name, created_at FROM filter_profiles WHERE id = ?",
+        "SELECT id, name, is_default, created_at FROM filter_profiles WHERE id = ?",
     )
     .bind(id)
     .fetch_optional(pool)
@@ -60,11 +60,19 @@ pub async fn get_profile_by_name(
     name: &str,
 ) -> anyhow::Result<Option<FilterProfile>> {
     Ok(sqlx::query_as::<_, FilterProfile>(
-        "SELECT id, name, created_at FROM filter_profiles WHERE name = ?",
+        "SELECT id, name, is_default, created_at FROM filter_profiles WHERE name = ?",
     )
     .bind(name)
     .fetch_optional(pool)
     .await?)
+}
+
+pub async fn get_default_profile_id(pool: &SqlitePool) -> anyhow::Result<String> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT id FROM filter_profiles WHERE is_default = 1 LIMIT 1")
+            .fetch_optional(pool)
+            .await?;
+    Ok(row.map(|r| r.0).unwrap_or_default())
 }
 
 pub async fn count_system_filters(pool: &SqlitePool, profile_id: &str) -> anyhow::Result<i64> {
@@ -104,34 +112,26 @@ pub async fn set_setting(pool: &SqlitePool, key: &str, value: &str) -> anyhow::R
     Ok(())
 }
 
-pub async fn get_active_profile_id(pool: &SqlitePool) -> anyhow::Result<String> {
-    get_setting(pool, "active_profile_id")
-        .await
-        .map(|v| v.unwrap_or_default())
-}
-
-pub async fn set_active_profile_id(pool: &SqlitePool, profile_id: &str) -> anyhow::Result<()> {
-    set_setting(pool, "active_profile_id", profile_id).await
-}
-
-/// Ensure a "default" profile exists and the active_profile_id setting points to a valid profile.
+/// Ensure a "default" profile with is_default=1 exists.
 pub async fn ensure_default_profile(pool: &SqlitePool) -> anyhow::Result<()> {
     let profiles = list_profiles(pool).await?;
-    let active_id = get_setting(pool, "active_profile_id").await?;
 
-    // Check if active_profile_id points to an existing profile
-    let active_valid = active_id
-        .as_ref()
-        .map(|aid| profiles.iter().any(|p| p.id.to_string() == *aid))
-        .unwrap_or(false);
+    let has_default = profiles.iter().any(|p| p.is_default);
 
     if profiles.is_empty() {
-        // Create default profile and set it active
-        let id = create_profile(pool, "default").await?;
-        set_active_profile_id(pool, &id.to_string()).await?;
-    } else if !active_valid {
-        // Point to first existing profile
-        set_active_profile_id(pool, &profiles[0].id.to_string()).await?;
+        // Create default profile and mark it as default
+        let id = uuid::Uuid::new_v4();
+        sqlx::query("INSERT INTO filter_profiles (id, name, is_default) VALUES (?, ?, 1)")
+            .bind(id.to_string())
+            .bind("default")
+            .execute(pool)
+            .await?;
+    } else if !has_default {
+        // Mark the first profile as default
+        sqlx::query("UPDATE filter_profiles SET is_default = 1 WHERE id = ?")
+            .bind(profiles[0].id.to_string())
+            .execute(pool)
+            .await?;
     }
 
     Ok(())

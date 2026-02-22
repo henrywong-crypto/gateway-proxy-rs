@@ -1,7 +1,7 @@
 use leptos::either::Either;
 use leptos::prelude::*;
 
-use common::models::Session;
+use common::models::{FilterProfile, Session};
 use templates::{Breadcrumb, InfoRow, NavLink, Page, Subpage};
 
 pub fn render_sessions_index(sessions: &[Session]) -> String {
@@ -73,7 +73,10 @@ pub fn render_sessions_index(sessions: &[Session]) -> String {
     .render()
 }
 
-pub fn render_new_session() -> String {
+pub fn render_new_session(profiles: &[FilterProfile], default_profile_id: &str) -> String {
+    let profiles = profiles.to_vec();
+    let default_profile_id = default_profile_id.to_string();
+
     let form = view! {
         <h2>"New Session"</h2>
         <form method="POST" action="/_dashboard/sessions/new">
@@ -85,6 +88,25 @@ pub fn render_new_session() -> String {
                 <tr>
                     <td><label>"Target URL"</label></td>
                     <td><input type="text" name="target_url" required placeholder="https://api.example.com" size="60"/></td>
+                </tr>
+                <tr>
+                    <td><label>"Filter Profile"</label></td>
+                    <td>
+                        <select name="profile_id">
+                            {profiles.into_iter().map(|p| {
+                                let pid = p.id.to_string();
+                                let selected = pid == default_profile_id;
+                                let label = if p.is_default {
+                                    format!("{} (default)", p.name)
+                                } else {
+                                    p.name.clone()
+                                };
+                                view! {
+                                    <option value={pid} selected={selected}>{label}</option>
+                                }
+                            }).collect::<Vec<_>>()}
+                        </select>
+                    </td>
                 </tr>
                 <tr>
                     <td><label>"Disable TLS Verify"</label></td>
@@ -121,7 +143,7 @@ pub fn render_new_session() -> String {
     .render()
 }
 
-pub fn render_edit_session(session: &Session, port: u16) -> String {
+pub fn render_edit_session(session: &Session, port: u16, profiles: &[FilterProfile]) -> String {
     let session = session.clone();
     let session_name = session.name.clone();
     let edit_action = format!("/_dashboard/sessions/{}/edit", session.id);
@@ -129,6 +151,8 @@ pub fn render_edit_session(session: &Session, port: u16) -> String {
     let tls_disabled = session.tls_verify_disabled;
     let auth_header_val = session.auth_header.clone().unwrap_or_default();
     let x_api_key_val = session.x_api_key.clone().unwrap_or_default();
+    let current_profile_id = session.profile_id.clone().unwrap_or_default();
+    let profiles = profiles.to_vec();
 
     let form = view! {
         <h2>"Edit Session"</h2>
@@ -141,6 +165,25 @@ pub fn render_edit_session(session: &Session, port: u16) -> String {
                 <tr>
                     <td><label>"Target URL"</label></td>
                     <td><input type="text" name="target_url" required value={session.target_url} size="60"/></td>
+                </tr>
+                <tr>
+                    <td><label>"Filter Profile"</label></td>
+                    <td>
+                        <select name="profile_id">
+                            {profiles.into_iter().map(|p| {
+                                let pid = p.id.to_string();
+                                let selected = pid == current_profile_id;
+                                let label = if p.is_default {
+                                    format!("{} (default)", p.name)
+                                } else {
+                                    p.name.clone()
+                                };
+                                view! {
+                                    <option value={pid} selected={selected}>{label}</option>
+                                }
+                            }).collect::<Vec<_>>()}
+                        </select>
+                    </td>
                 </tr>
                 <tr>
                     <td><label>"Disable TLS Verify"</label></td>

@@ -8,10 +8,7 @@ pub async fn filters_index(pool: web::Data<SqlitePool>) -> HttpResponse {
         Ok(p) => p,
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
-    let active_profile_id = db::get_active_profile_id(pool.get_ref())
-        .await
-        .unwrap_or_default();
-    let html = pages::filters::render_filters_index(&profiles, &active_profile_id);
+    let html = pages::filters::render_filters_index(&profiles);
     HttpResponse::Ok().content_type("text/html").body(html)
 }
 
@@ -46,9 +43,6 @@ pub async fn filter_profile_show(
         Ok(None) => return HttpResponse::NotFound().body("Profile not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
-    let active_profile_id = db::get_active_profile_id(pool.get_ref())
-        .await
-        .unwrap_or_default();
     let system_count = db::count_system_filters(pool.get_ref(), &profile_id)
         .await
         .unwrap_or(0);
@@ -58,13 +52,8 @@ pub async fn filter_profile_show(
     let keep_tool_pairs = db::get_keep_tool_pairs(pool.get_ref(), &profile_id)
         .await
         .unwrap_or(0);
-    let html = pages::filters::render_profile_show(
-        &profile,
-        &active_profile_id,
-        system_count,
-        tool_count,
-        keep_tool_pairs,
-    );
+    let html =
+        pages::filters::render_profile_show(&profile, system_count, tool_count, keep_tool_pairs);
     HttpResponse::Ok().content_type("text/html").body(html)
 }
 
@@ -100,24 +89,23 @@ pub async fn filter_profile_update(
         .finish()
 }
 
-pub async fn filter_profile_activate(
-    pool: web::Data<SqlitePool>,
-    path: web::Path<String>,
-) -> HttpResponse {
-    let profile_id = path.into_inner();
-    let _ = db::set_active_profile_id(pool.get_ref(), &profile_id).await;
-    HttpResponse::SeeOther()
-        .insert_header(("Location", format!("/_dashboard/filters/{}", profile_id)))
-        .finish()
-}
-
 pub async fn filter_profile_delete(
     pool: web::Data<SqlitePool>,
     path: web::Path<String>,
 ) -> HttpResponse {
     let profile_id = path.into_inner();
+
+    // Protect the default profile from deletion
+    match db::get_profile(pool.get_ref(), &profile_id).await {
+        Ok(Some(p)) if p.is_default => {
+            return HttpResponse::BadRequest().body("Cannot delete the default profile");
+        }
+        Ok(None) => return HttpResponse::NotFound().body("Profile not found"),
+        Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
+        _ => {}
+    }
+
     let _ = db::delete_profile(pool.get_ref(), &profile_id).await;
-    let _ = db::ensure_default_profile(pool.get_ref()).await;
     HttpResponse::SeeOther()
         .insert_header(("Location", "/_dashboard/filters"))
         .finish()

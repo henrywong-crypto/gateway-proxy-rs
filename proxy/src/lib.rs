@@ -10,7 +10,7 @@ use sqlx::SqlitePool;
 use shared::{
     actix_headers_iter, build_forward_headers, build_stored_path, build_target_url,
     effective_client, forward_response_headers, get_session_or_error, headers_to_json,
-    load_active_filters, log_request, parse_body_fields, store_response, to_actix_status,
+    load_filters_for_profile, log_request, parse_body_fields, store_response, to_actix_status,
     RequestMeta,
 };
 
@@ -69,7 +69,9 @@ pub async fn proxy_handler(
     .map_err(ErrorInternalServerError)?;
 
     // Apply filters to the body before forwarding
-    let forward_body = if let Some(filters) = load_active_filters(pool.get_ref()).await {
+    let forward_body = if let Some(filters) =
+        load_filters_for_profile(pool.get_ref(), session.profile_id.as_deref()).await
+    {
         if let Ok(mut json_body) = serde_json::from_slice::<serde_json::Value>(&body) {
             filter::apply_filters(
                 &mut json_body,

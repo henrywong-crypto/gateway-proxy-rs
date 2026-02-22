@@ -67,18 +67,8 @@ pub async fn request_detail_page(
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
 
-    let profile_id = if let Some(profile_name) = query.get("profile") {
-        match db::get_profile_by_name(pool.get_ref(), profile_name).await {
-            Ok(Some(p)) => p.id.to_string(),
-            _ => db::get_active_profile_id(pool.get_ref())
-                .await
-                .unwrap_or_default(),
-        }
-    } else {
-        db::get_active_profile_id(pool.get_ref())
-            .await
-            .unwrap_or_default()
-    };
+    // Use the session's profile_id for filters
+    let profile_id = session.profile_id.clone().unwrap_or_default();
 
     let filters: Vec<String> = match page.as_str() {
         "system" => db::list_system_filters(pool.get_ref(), &profile_id)

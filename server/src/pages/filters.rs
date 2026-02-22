@@ -4,11 +4,10 @@ use leptos::prelude::*;
 use common::models::{FilterProfile, SystemFilter, ToolFilter};
 use templates::{Breadcrumb, InfoRow, NavLink, Page, Subpage};
 
-pub fn render_filters_index(profiles: &[FilterProfile], active_profile_id: &str) -> String {
+pub fn render_filters_index(profiles: &[FilterProfile]) -> String {
     let profiles = profiles.to_vec();
     let empty = profiles.is_empty();
     let total = profiles.len();
-    let active_profile_id = active_profile_id.to_string();
 
     let content = view! {
         <h2>"Profiles"</h2>
@@ -23,36 +22,34 @@ pub fn render_filters_index(profiles: &[FilterProfile], active_profile_id: &str)
                     <tr>
                         <th>"ID"</th>
                         <th>"Name"</th>
-                        <th>"Status"</th>
                         <th>"Created"</th>
                         <th></th>
                     </tr>
                     {profiles.into_iter().map(|p| {
                         let pid = p.id.to_string();
-                        let is_active = pid == active_profile_id;
                         let href = format!("/_dashboard/filters/{}", pid);
-                        let activate_action = format!("/_dashboard/filters/{}/activate", pid);
                         let delete_action = format!("/_dashboard/filters/{}/delete", pid);
+                        let is_default = p.is_default;
+                        let name_display = if is_default {
+                            format!("{} (default)", p.name)
+                        } else {
+                            p.name.clone()
+                        };
                         view! {
                             <tr>
                                 <td><a href={href}>{pid}</a></td>
-                                <td>{p.name}</td>
-                                <td>{if is_active { "active" } else { "--" }}</td>
+                                <td>{name_display}</td>
                                 <td>{p.created_at.clone().unwrap_or_default()}</td>
                                 <td>
-                                    {if !is_active {
+                                    {if !is_default {
                                         Either::Left(view! {
-                                            <form method="POST" action={activate_action}>
-                                                <button type="submit">"Activate"</button>
+                                            <form method="POST" action={delete_action}>
+                                                <button type="submit">"Delete"</button>
                                             </form>
-                                            " "
                                         })
                                     } else {
                                         Either::Right(())
                                     }}
-                                    <form method="POST" action={delete_action}>
-                                        <button type="submit">"Delete"</button>
-                                    </form>
                                 </td>
                             </tr>
                         }
@@ -113,31 +110,17 @@ pub fn render_new_profile() -> String {
 
 pub fn render_profile_show(
     profile: &FilterProfile,
-    active_profile_id: &str,
     system_count: i64,
     tool_count: i64,
     keep_tool_pairs: i64,
 ) -> String {
     let profile = profile.clone();
-    let is_active = profile.id.to_string() == active_profile_id;
     let profile_name = profile.name.clone();
     let profile_id = profile.id.to_string();
-    let activate_action = format!("/_dashboard/filters/{}/activate", profile_id);
     let message_filter_label = if keep_tool_pairs > 0 {
         format!("keep last {}", keep_tool_pairs)
     } else {
         "off".to_string()
-    };
-
-    let actions = if !is_active {
-        Either::Left(view! {
-            <h2>"Actions"</h2>
-            <form method="POST" action={activate_action}>
-                <button type="submit">"Activate"</button>
-            </form>
-        })
-    } else {
-        Either::Right(())
     };
 
     Page {
@@ -156,10 +139,10 @@ pub fn render_profile_show(
         ],
         info_rows: vec![
             InfoRow::new("Name", &profile.name),
-            InfoRow::new("Status", if is_active { "active" } else { "inactive" }),
+            InfoRow::new("Default", if profile.is_default { "yes" } else { "no" }),
             InfoRow::new("Created", &profile.created_at.unwrap_or_default()),
         ],
-        content: actions,
+        content: (),
         subpages: vec![
             Subpage::new(
                 "System Filters",

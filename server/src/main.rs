@@ -93,10 +93,6 @@ async fn main() -> anyhow::Result<()> {
                 web::post().to(handlers::filter_profile_update),
             )
             .route(
-                "/_dashboard/filters/{id}/activate",
-                web::post().to(handlers::filter_profile_activate),
-            )
-            .route(
                 "/_dashboard/filters/{id}/delete",
                 web::post().to(handlers::filter_profile_delete),
             )

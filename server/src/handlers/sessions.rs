@@ -22,8 +22,12 @@ pub async fn sessions_index(pool: web::Data<SqlitePool>) -> HttpResponse {
     }
 }
 
-pub async fn new_session() -> HttpResponse {
-    let html = pages::sessions::render_new_session();
+pub async fn new_session(pool: web::Data<SqlitePool>) -> HttpResponse {
+    let profiles = db::list_profiles(pool.get_ref()).await.unwrap_or_default();
+    let default_profile_id = db::get_default_profile_id(pool.get_ref())
+        .await
+        .unwrap_or_default();
+    let html = pages::sessions::render_new_session(&profiles, &default_profile_id);
     HttpResponse::Ok().content_type("text/html").body(html)
 }
 
@@ -52,16 +56,28 @@ pub async fn create_session(
             Some(trimmed.to_string())
         }
     });
+    let profile_id = form.get("profile_id").and_then(|v| {
+        let trimmed = v.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    });
 
     let id = Uuid::new_v4();
+    let id_str = id.to_string();
     match db::create_session(
         pool.get_ref(),
-        &id.to_string(),
-        &name,
-        &target_url,
-        tls_verify_disabled,
-        auth_header.as_deref(),
-        x_api_key.as_deref(),
+        &db::SessionParams {
+            id: &id_str,
+            name: &name,
+            target_url: &target_url,
+            tls_verify_disabled,
+            auth_header: auth_header.as_deref(),
+            x_api_key: x_api_key.as_deref(),
+            profile_id: profile_id.as_deref(),
+        },
     )
     .await
     {
@@ -85,7 +101,17 @@ pub async fn session_show(
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
 
-    let html = pages::session_show::render_session_show(&session, args.port);
+    let profile_name = if let Some(ref pid) = session.profile_id {
+        match db::get_profile(pool.get_ref(), pid).await {
+            Ok(Some(p)) => Some(p.name),
+            _ => None,
+        }
+    } else {
+        None
+    };
+
+    let html =
+        pages::session_show::render_session_show(&session, args.port, profile_name.as_deref());
     HttpResponse::Ok().content_type("text/html").body(html)
 }
 
@@ -102,7 +128,8 @@ pub async fn edit_session(
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
 
-    let html = pages::sessions::render_edit_session(&session, args.port);
+    let profiles = db::list_profiles(pool.get_ref()).await.unwrap_or_default();
+    let html = pages::sessions::render_edit_session(&session, args.port, &profiles);
     HttpResponse::Ok().content_type("text/html").body(html)
 }
 
@@ -133,15 +160,26 @@ pub async fn update_session(
             Some(trimmed.to_string())
         }
     });
+    let profile_id = form.get("profile_id").and_then(|v| {
+        let trimmed = v.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    });
 
     match db::update_session(
         pool.get_ref(),
-        &session_id,
-        &name,
-        &target_url,
-        tls_verify_disabled,
-        auth_header.as_deref(),
-        x_api_key.as_deref(),
+        &db::SessionParams {
+            id: &session_id,
+            name: &name,
+            target_url: &target_url,
+            tls_verify_disabled,
+            auth_header: auth_header.as_deref(),
+            x_api_key: x_api_key.as_deref(),
+            profile_id: profile_id.as_deref(),
+        },
     )
     .await
     {

@@ -7,7 +7,7 @@ use sqlx::SqlitePool;
 
 use crate::shared::{
     actix_headers_iter, effective_client, extract_request_fields, get_session_or_error,
-    headers_to_json, load_active_filters, log_request, to_actix_status, RequestMeta,
+    headers_to_json, load_filters_for_profile, log_request, to_actix_status, RequestMeta,
 };
 use crate::sse::parse_sse_events;
 
@@ -254,7 +254,9 @@ pub async fn bedrock_streaming_handler(
 
     // Apply filters to the data before forwarding
     let mut filtered_data = original_data.clone();
-    if let Some(filters) = load_active_filters(pool.get_ref()).await {
+    if let Some(filters) =
+        load_filters_for_profile(pool.get_ref(), session.profile_id.as_deref()).await
+    {
         crate::filter::apply_filters(
             &mut filtered_data,
             &filters.system_filters,

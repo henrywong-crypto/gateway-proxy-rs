@@ -9,9 +9,30 @@ fn copy_link_html(text: &str) -> String {
     )
 }
 
-pub fn render_session_show(session: &Session, port: u16) -> String {
+pub fn render_session_show(session: &Session, port: u16, profile_name: Option<&str>) -> String {
     let proxy_url = format!("http://localhost:{}/_proxy/{}/", port, session.id);
     let bedrock_url = format!("http://localhost:{}/_bedrock/{}/", port, session.id);
+
+    let mut info_rows = vec![
+        InfoRow::new("Name", &session.name),
+        InfoRow::raw(
+            "Proxy URL",
+            format!("{}{}", html_escape(&proxy_url), copy_link_html(&proxy_url)),
+        ),
+        InfoRow::raw(
+            "Bedrock URL",
+            format!(
+                "{}{}",
+                html_escape(&bedrock_url),
+                copy_link_html(&bedrock_url)
+            ),
+        ),
+        InfoRow::new("Target", &session.target_url),
+    ];
+
+    if let Some(name) = profile_name {
+        info_rows.push(InfoRow::new("Filter Profile", name));
+    }
 
     Page {
         title: format!("Gateway Proxy - Session {}", session.name),
@@ -27,22 +48,7 @@ pub fn render_session_show(session: &Session, port: u16) -> String {
             ),
             NavLink::back(),
         ],
-        info_rows: vec![
-            InfoRow::new("Name", &session.name),
-            InfoRow::raw(
-                "Proxy URL",
-                format!("{}{}", html_escape(&proxy_url), copy_link_html(&proxy_url)),
-            ),
-            InfoRow::raw(
-                "Bedrock URL",
-                format!(
-                    "{}{}",
-                    html_escape(&bedrock_url),
-                    copy_link_html(&bedrock_url)
-                ),
-            ),
-            InfoRow::new("Target", &session.target_url),
-        ],
+        info_rows,
         content: (),
         subpages: vec![Subpage::new(
             "Requests",

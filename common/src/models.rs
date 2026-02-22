@@ -9,6 +9,7 @@ pub struct Session {
     pub tls_verify_disabled: bool,
     pub auth_header: Option<String>,
     pub x_api_key: Option<String>,
+    pub profile_id: Option<String>,
     pub created_at: Option<String>,
     #[sqlx(default)]
     pub request_count: i64,
@@ -44,6 +45,7 @@ pub struct FilterProfile {
     #[sqlx(try_from = "String")]
     pub id: uuid::Uuid,
     pub name: String,
+    pub is_default: bool,
     pub created_at: Option<String>,
 }
 
