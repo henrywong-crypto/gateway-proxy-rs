@@ -173,7 +173,22 @@ pub async fn request_detail_page(
         _ => Vec::new(),
     };
 
-    let html = pages::detail::render_detail_page(&request, &session, &page, &query, &filters);
+    let keep_tool_pairs = if page == "messages" {
+        db::get_keep_tool_pairs(pool.get_ref(), &profile_id)
+            .await
+            .unwrap_or(0)
+    } else {
+        0
+    };
+
+    let html = pages::detail::render_detail_page(
+        &request,
+        &session,
+        &page,
+        &query,
+        &filters,
+        keep_tool_pairs,
+    );
     HttpResponse::Ok().content_type("text/html").body(html)
 }
 
@@ -309,8 +324,16 @@ pub async fn filter_profile_show(
     let tool_count = db::count_tool_filters(pool.get_ref(), &profile_id)
         .await
         .unwrap_or(0);
-    let html =
-        pages::filters::render_profile_show(&profile, &active_profile_id, system_count, tool_count);
+    let keep_tool_pairs = db::get_keep_tool_pairs(pool.get_ref(), &profile_id)
+        .await
+        .unwrap_or(0);
+    let html = pages::filters::render_profile_show(
+        &profile,
+        &active_profile_id,
+        system_count,
+        tool_count,
+        keep_tool_pairs,
+    );
     HttpResponse::Ok().content_type("text/html").body(html)
 }
 
@@ -587,6 +610,44 @@ pub async fn tool_filter_delete(
         .insert_header((
             "Location",
             format!("/_dashboard/filters/{}/tools", profile_id),
+        ))
+        .finish()
+}
+
+pub async fn filter_profile_messages(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<String>,
+) -> HttpResponse {
+    let profile_id = path.into_inner();
+    let profile = match db::get_profile(pool.get_ref(), &profile_id).await {
+        Ok(Some(p)) => p,
+        Ok(None) => return HttpResponse::NotFound().body("Profile not found"),
+        Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
+    };
+    let keep_tool_pairs = db::get_keep_tool_pairs(pool.get_ref(), &profile_id)
+        .await
+        .unwrap_or(0);
+    let html = pages::filters::render_profile_messages(&profile, keep_tool_pairs);
+    HttpResponse::Ok().content_type("text/html").body(html)
+}
+
+pub async fn filter_profile_messages_post(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<String>,
+    form: web::Form<std::collections::HashMap<String, String>>,
+) -> HttpResponse {
+    let profile_id = path.into_inner();
+
+    if let Some(val) = form.get("keep_tool_pairs") {
+        if let Ok(n) = val.parse::<i64>() {
+            let _ = db::set_message_filter(pool.get_ref(), &profile_id, n).await;
+        }
+    }
+
+    HttpResponse::SeeOther()
+        .insert_header((
+            "Location",
+            format!("/_dashboard/filters/{}/messages", profile_id),
         ))
         .finish()
 }

@@ -6,25 +6,49 @@ mod tools;
 
 use leptos::prelude::*;
 
-use self::common::{breadcrumb_html, render_kv_table, render_response_headers};
+use self::common::{render_kv_table, render_response_headers};
 use self::messages::render_messages;
 use self::sse::render_response_sse;
 use self::system::render_system;
 use self::tools::render_tools;
-use crate::pages::{html_escape, page_layout};
+use crate::pages::html_escape;
 use ::common::models::{ProxyRequest, Session};
+use templates::{Breadcrumb, InfoRow, NavLink, Page, Subpage};
+
+fn detail_breadcrumbs(
+    session: &Session,
+    req: &ProxyRequest,
+    current_page: Option<&str>,
+) -> Vec<Breadcrumb> {
+    let mut crumbs = vec![
+        Breadcrumb::link("Home", "/_dashboard"),
+        Breadcrumb::link("Sessions", "/_dashboard/sessions"),
+        Breadcrumb::link(
+            format!("Session {}", session.name),
+            format!("/_dashboard/sessions/{}", req.session_id),
+        ),
+        Breadcrumb::link(
+            "Requests",
+            format!("/_dashboard/sessions/{}/requests", req.session_id),
+        ),
+    ];
+    if let Some(label) = current_page {
+        crumbs.push(Breadcrumb::link(
+            format!("Request #{}", req.id),
+            format!(
+                "/_dashboard/sessions/{}/requests/{}",
+                req.session_id, req.id
+            ),
+        ));
+        crumbs.push(Breadcrumb::current(label));
+    } else {
+        crumbs.push(Breadcrumb::current(format!("Request #{}", req.id)));
+    }
+    crumbs
+}
 
 pub fn render_detail_overview(req: &ProxyRequest, session: &Session) -> String {
     let req = req.clone();
-    let title = format!(
-        "Gateway Proxy - Session {} - Request #{}",
-        session.name, req.id
-    );
-
-    let method = html_escape(&req.method);
-    let path = html_escape(&req.path);
-    let model = req.model.as_deref().map(html_escape).unwrap_or_default();
-    let timestamp = html_escape(&req.timestamp);
 
     let base = format!(
         "/_dashboard/sessions/{}/requests/{}",
@@ -42,7 +66,7 @@ pub fn render_detail_overview(req: &ProxyRequest, session: &Session) -> String {
             .and_then(|v| v.as_object().map(|o| o.len()))
     }
 
-    let subpages: Vec<(&str, &str, bool, String)> = vec![
+    let subpage_defs: Vec<(&str, &str, bool, String)> = vec![
         (
             "messages",
             "Messages",
@@ -102,49 +126,29 @@ pub fn render_detail_overview(req: &ProxyRequest, session: &Session) -> String {
         ),
     ];
 
-    let subpages: Vec<_> = subpages
+    let subpages: Vec<Subpage> = subpage_defs
         .into_iter()
         .filter(|(_, _, available, _)| *available)
+        .map(|(key, label, _, count)| Subpage::new(label, format!("{}/{}", base, key), count))
         .collect();
 
-    let subpages_html: String = subpages
-        .iter()
-        .map(|(key, label, _, count)| {
-            format!(
-                r#"<tr><td><a href="{}/{}">{}</a></td><td>{}</td></tr>"#,
-                base,
-                key,
-                html_escape(label),
-                count,
-            )
-        })
-        .collect();
-
-    let subpages_table = format!(
-        r#"<table><tr><th>Page</th><th>Count</th></tr>{}</table>"#,
-        subpages_html
-    );
-
-    let bc = breadcrumb_html(session, &req, None);
-
-    let body = view! {
-        <div inner_html={bc}/>
-        <h2>"Navigation"</h2>
-        <table>
-            <tr><td><a href="javascript:history.back()">"Back"</a></td></tr>
-        </table>
-        <h2>"Info"</h2>
-        <table>
-            <tr><td>"Method"</td><td>{method}</td></tr>
-            <tr><td>"Path"</td><td>{path}</td></tr>
-            <tr><td>"Model"</td><td>{model}</td></tr>
-            <tr><td>"Time"</td><td>{timestamp}</td></tr>
-        </table>
-        <h2>"Subpages"</h2>
-        <div inner_html={subpages_table}/>
-    };
-
-    page_layout(&title, body.to_html())
+    Page {
+        title: format!(
+            "Gateway Proxy - Session {} - Request #{}",
+            session.name, req.id
+        ),
+        breadcrumbs: detail_breadcrumbs(session, &req, None),
+        nav_links: vec![NavLink::back()],
+        info_rows: vec![
+            InfoRow::new("Method", &req.method),
+            InfoRow::new("Path", &req.path),
+            InfoRow::new("Model", req.model.as_deref().unwrap_or("")),
+            InfoRow::new("Time", &req.timestamp),
+        ],
+        content: (),
+        subpages,
+    }
+    .render()
 }
 
 pub fn render_detail_page(
@@ -153,6 +157,7 @@ pub fn render_detail_page(
     page: &str,
     query: &std::collections::HashMap<String, String>,
     filters: &[String],
+    keep_tool_pairs: i64,
 ) -> String {
     let req = req.clone();
     let page_label = match page {
@@ -166,10 +171,6 @@ pub fn render_detail_page(
         "response_sse" => "Response SSE",
         _ => "Unknown",
     };
-    let title = format!(
-        "Gateway Proxy - Session {} - Request #{} - {}",
-        session.name, req.id, page_label
-    );
 
     let truncate = query.get("truncate").map(|v| v.as_str()) != Some("off");
     let order = query
@@ -203,7 +204,7 @@ pub fn render_detail_page(
                         "newest first"
                     }
                 );
-                render_messages(json_str, &order)
+                render_messages(json_str, &order, keep_tool_pairs)
             } else {
                 "<p>No messages.</p>".to_string()
             }
@@ -260,8 +261,6 @@ pub fn render_detail_page(
         _ => "<p>Unknown tab</p>".to_string(),
     };
 
-    let bc = breadcrumb_html(session, &req, Some((page, page_label)));
-
     fn json_count(json: Option<&str>) -> Option<usize> {
         json.and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
             .and_then(|v| {
@@ -285,17 +284,23 @@ pub fn render_detail_page(
         .map(|n| format!("<p>Total: {}</p>", n))
         .unwrap_or_default();
 
-    let body = view! {
-        <div inner_html={bc}/>
-        <h2>"Navigation"</h2>
-        <table>
-            <tr><td><a href="javascript:history.back()">"Back"</a></td></tr>
-        </table>
+    let content = view! {
         <h2>{page_label}</h2>
         <div inner_html={total_html}/>
         <div inner_html={controls_html}/>
         <div inner_html={content_html}/>
     };
 
-    page_layout(&title, body.to_html())
+    Page {
+        title: format!(
+            "Gateway Proxy - Session {} - Request #{} - {}",
+            session.name, req.id, page_label
+        ),
+        breadcrumbs: detail_breadcrumbs(session, &req, Some(page_label)),
+        nav_links: vec![NavLink::back()],
+        info_rows: vec![],
+        content,
+        subpages: vec![],
+    }
+    .render()
 }

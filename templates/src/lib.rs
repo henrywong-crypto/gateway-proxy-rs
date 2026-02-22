@@ -310,7 +310,10 @@ line2</pre>"#
                 Breadcrumb::link("Home", "/"),
                 Breadcrumb::current("Current"),
             ],
-            ..Default::default()
+            nav_links: vec![],
+            info_rows: vec![],
+            content: (),
+            subpages: vec![],
         }
         .render();
         assert!(html.contains("<h1>"));
@@ -325,8 +328,11 @@ line2</pre>"#
     fn page_render_nav_links() {
         let html = Page {
             title: "Test".to_string(),
+            breadcrumbs: vec![],
             nav_links: vec![NavLink::new("Edit", "/edit"), NavLink::back()],
-            ..Default::default()
+            info_rows: vec![],
+            content: (),
+            subpages: vec![],
         }
         .render();
         assert!(html.contains("<h2>Navigation</h2>"));
@@ -340,8 +346,11 @@ line2</pre>"#
     fn page_render_info_rows_escaped() {
         let html = Page {
             title: "Test".to_string(),
+            breadcrumbs: vec![],
+            nav_links: vec![],
             info_rows: vec![InfoRow::new("Key", "<value>")],
-            ..Default::default()
+            content: (),
+            subpages: vec![],
         }
         .render();
         assert!(html.contains("<h2>Info</h2>"));
@@ -354,8 +363,11 @@ line2</pre>"#
     fn page_render_info_rows_raw() {
         let html = Page {
             title: "Test".to_string(),
+            breadcrumbs: vec![],
+            nav_links: vec![],
             info_rows: vec![InfoRow::raw("Key", "<b>bold</b>")],
-            ..Default::default()
+            content: (),
+            subpages: vec![],
         }
         .render();
         assert!(html.contains("<b>bold</b>"));
@@ -380,8 +392,11 @@ line2</pre>"#
     fn page_render_subpages() {
         let html = Page {
             title: "Test".to_string(),
+            breadcrumbs: vec![],
+            nav_links: vec![],
+            info_rows: vec![],
+            content: (),
             subpages: vec![Subpage::new("Requests", "/requests", 42)],
-            ..Default::default()
         }
         .render();
         assert!(html.contains("<h2>Subpages</h2>"));
@@ -396,7 +411,11 @@ line2</pre>"#
     fn page_render_empty_sections_omitted() {
         let html = Page {
             title: "Test".to_string(),
-            ..Default::default()
+            breadcrumbs: vec![],
+            nav_links: vec![],
+            info_rows: vec![],
+            content: (),
+            subpages: vec![],
         }
         .render();
         assert!(!html.contains("<h1>"));

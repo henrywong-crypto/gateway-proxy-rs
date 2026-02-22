@@ -1,8 +1,8 @@
 use leptos::either::Either;
 use leptos::prelude::*;
 
-use crate::pages::page_layout;
 use common::models::{ProxyRequest, Session};
+use templates::{Breadcrumb, NavLink, Page};
 
 pub fn render_requests_index(
     session: &Session,
@@ -11,7 +11,6 @@ pub fn render_requests_index(
 ) -> String {
     let session = session.clone();
     let requests = requests.to_vec();
-    let session_name = session.name.clone();
     let total = requests.len();
 
     let refresh_href = if auto_refresh {
@@ -25,25 +24,12 @@ pub fn render_requests_index(
         "Enable auto-refresh"
     };
 
-    let body = view! {
+    let content = view! {
         {if auto_refresh {
             Some(view! { <meta http-equiv="refresh" content="3"/> })
         } else {
             None
         }}
-        <h1>
-            <a href="/_dashboard">"Home"</a>
-            " / "
-            <a href="/_dashboard/sessions">"Sessions"</a>
-            " / "
-            <a href={format!("/_dashboard/sessions/{}", session.id)}>{format!("Session {}", session.name)}</a>
-            " / "
-            "Requests"
-        </h1>
-        <h2>"Navigation"</h2>
-        <table>
-            <tr><td><a href="javascript:history.back()">{"Back"}</a></td></tr>
-        </table>
         <h2>"Requests"</h2>
         <p>{format!("Total: {}", total)}</p>
         <a href={refresh_href}>{refresh_label}</a>
@@ -92,10 +78,23 @@ pub fn render_requests_index(
         }}
     };
 
-    page_layout(
-        &format!("Gateway Proxy - Session {} - Requests", session_name),
-        body.to_html(),
-    )
+    Page {
+        title: format!("Gateway Proxy - Session {} - Requests", session.name),
+        breadcrumbs: vec![
+            Breadcrumb::link("Home", "/_dashboard"),
+            Breadcrumb::link("Sessions", "/_dashboard/sessions"),
+            Breadcrumb::link(
+                format!("Session {}", session.name),
+                format!("/_dashboard/sessions/{}", session.id),
+            ),
+            Breadcrumb::current("Requests"),
+        ],
+        nav_links: vec![NavLink::back()],
+        info_rows: vec![],
+        content,
+        subpages: vec![],
+    }
+    .render()
 }
 
 fn get_message_preview(r: &ProxyRequest) -> (String, String) {

@@ -1,4 +1,5 @@
 pub mod bedrock;
+pub mod filter;
 pub(crate) mod shared;
 pub(crate) mod sse;
 
@@ -8,8 +9,9 @@ use sqlx::SqlitePool;
 
 use shared::{
     actix_headers_iter, build_forward_headers, build_stored_path, build_target_url,
-    effective_client, forward_response_headers, get_session_or_error, headers_to_json, log_request,
-    parse_body_fields, store_response, to_actix_status, RequestMeta,
+    effective_client, forward_response_headers, get_session_or_error, headers_to_json,
+    load_active_filters, log_request, parse_body_fields, store_response, to_actix_status,
+    RequestMeta,
 };
 
 pub async fn proxy_handler(
@@ -66,6 +68,23 @@ pub async fn proxy_handler(
     .await
     .map_err(ErrorInternalServerError)?;
 
+    // Apply filters to the body before forwarding
+    let forward_body = if let Some(filters) = load_active_filters(pool.get_ref()).await {
+        if let Ok(mut json_body) = serde_json::from_slice::<serde_json::Value>(&body) {
+            filter::apply_filters(
+                &mut json_body,
+                &filters.system_filters,
+                &filters.tool_filters,
+                filters.keep_tool_pairs,
+            );
+            serde_json::to_vec(&json_body).unwrap_or_else(|_| body.to_vec())
+        } else {
+            body.to_vec()
+        }
+    } else {
+        body.to_vec()
+    };
+
     // Forward the request upstream
     let forward_headers =
         build_forward_headers(&req, session.auth_header.as_deref(), "authorization");
@@ -76,7 +95,7 @@ pub async fn proxy_handler(
     let upstream = effective_client
         .request(parsed_method, &target_url)
         .headers(forward_headers)
-        .body(body.to_vec())
+        .body(forward_body)
         .send()
         .await
         .map_err(|e| ErrorBadGateway(format!("Upstream error: {}", e)))?;

@@ -53,3 +53,8 @@ CREATE TABLE IF NOT EXISTS tool_filters (
     name TEXT NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS message_filters (
+    profile_id TEXT PRIMARY KEY REFERENCES filter_profiles(id) ON DELETE CASCADE,
+    keep_tool_pairs INTEGER NOT NULL DEFAULT 0
+);

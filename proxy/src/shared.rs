@@ -8,6 +8,41 @@ use std::sync::LazyLock;
 
 use crate::sse;
 
+/// Loaded filter state for the active profile.
+pub struct ActiveFilters {
+    pub system_filters: Vec<String>,
+    pub tool_filters: Vec<String>,
+    pub keep_tool_pairs: i64,
+}
+
+/// Load filters for the currently active profile. Returns None if no active profile.
+pub async fn load_active_filters(pool: &SqlitePool) -> Option<ActiveFilters> {
+    let profile_id = db::get_active_profile_id(pool).await.ok()?;
+    if profile_id.is_empty() {
+        return None;
+    }
+    let system_filters: Vec<String> = db::list_system_filters(pool, &profile_id)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|f| f.pattern)
+        .collect();
+    let tool_filters: Vec<String> = db::list_tool_filters(pool, &profile_id)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|f| f.name)
+        .collect();
+    let keep_tool_pairs = db::get_keep_tool_pairs(pool, &profile_id)
+        .await
+        .unwrap_or(0);
+    Some(ActiveFilters {
+        system_filters,
+        tool_filters,
+        keep_tool_pairs,
+    })
+}
+
 /// Look up a session by ID, returning an actix error on failure or not-found.
 pub async fn get_session_or_error(
     pool: &SqlitePool,

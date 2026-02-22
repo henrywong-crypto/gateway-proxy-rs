@@ -8,31 +8,84 @@ user-invocable: false
 
 ## Framework
 
-Pages use **Leptos SSR** (`view!` macro) — JSX-like syntax compiled to HTML strings on the server. **No external CSS frameworks, no JavaScript libraries, no CDN links.** Everything is self-contained.
+Pages use the **`templates::Page`** struct for standard page sections (breadcrumbs, navigation, info rows, subpages) and **Leptos SSR** (`view!` macro) for custom content. **No external CSS frameworks, no JavaScript libraries, no CDN links.** Everything is self-contained.
 
 ```rust
 use leptos::prelude::*;
-use crate::pages::page_layout;
+use templates::{Breadcrumb, NavLink, Page};
 
-pub fn render_example(title: &str) -> String {
-    let body = view! {
-        <h1>"Page Title"</h1>
-        <table>
-            <tr><td>{title.to_string()}</td></tr>
-        </table>
+pub fn render_example() -> String {
+    let content = view! {
+        <h2>"Items"</h2>
+        <p>"Custom content here"</p>
     };
-    page_layout("Browser Tab Title", body.to_html())
+
+    Page {
+        title: "Gateway Proxy - Example".to_string(),
+        breadcrumbs: vec![
+            Breadcrumb::link("Home", "/_dashboard"),
+            Breadcrumb::current("Example"),
+        ],
+        nav_links: vec![NavLink::back()],
+        info_rows: vec![],
+        content,
+        subpages: vec![],
+    }
+    .render()
 }
 ```
 
-Every page function returns `String` by calling `page_layout(title, body.to_html())`.
+Every page function returns `String` by constructing a `Page` and calling `.render()`.
+
+### `Page` struct fields
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `title` | `String` | Browser tab title |
+| `breadcrumbs` | `Vec<Breadcrumb>` | `<h1>` breadcrumb trail |
+| `nav_links` | `Vec<NavLink>` | Navigation section links |
+| `info_rows` | `Vec<InfoRow>` | Key-value info table |
+| `content` | `C: IntoView` | Custom page content (Leptos view or `()`) |
+| `subpages` | `Vec<Subpage>` | Subpages table with Page/Count columns |
+
+Empty sections are automatically omitted from the rendered HTML.
+
+### Pages without custom content
+
+When a page only needs the standard sections (no custom content), use `Page<()>` with `..Default::default()`:
+
+```rust
+Page {
+    title: "Gateway Proxy - Home".to_string(),
+    breadcrumbs: vec![Breadcrumb::current("Home")],
+    subpages: vec![
+        Subpage::new("Sessions", "/_dashboard/sessions", session_count),
+    ],
+    ..Default::default()
+}
+.render()
+```
+
+**Important:** `..Default::default()` only works when the `content` field is `()` (omitted). When you provide a `content` view, you must specify all fields explicitly — `Default` is not implemented for `Page<SomeViewType>`.
+
+### Builder helpers
+
+| Helper | Purpose |
+|--------|---------|
+| `Breadcrumb::link(label, href)` | Breadcrumb item that is a link |
+| `Breadcrumb::current(label)` | Terminal breadcrumb item (plain text) |
+| `NavLink::new(label, href)` | Navigation link |
+| `NavLink::back()` | "Back" link using `javascript:history.back()` |
+| `InfoRow::new(label, value)` | Info row with HTML-escaped value |
+| `InfoRow::raw(label, value)` | Info row with raw HTML value (for copy links etc.) |
+| `Subpage::new(label, href, count)` | Subpage table entry — count accepts any `Display` type |
 
 ## Leptos `view!` syntax
 
 - String literals as text nodes: `"Click me"`
 - Variable interpolation: `{variable}` or `{expression}`
 - Conditionals: `Either::Left(view! { ... })` / `Either::Right(view! { ... })`
-- Conditionally hidden section: `Either::Right(view! {})` (empty view)
+- Conditionally hidden section: `Either::Right(())`
 - Optional elements: `Some(view! { ... })` / `None`
 - Iteration: `.into_iter().map(|item| view! { ... }).collect::<Vec<_>>()`
 - Pre-rendered HTML strings: `<div inner_html={html_string}/>` or `<span inner_html={html_string}/>`
@@ -40,11 +93,11 @@ Every page function returns `String` by calling `page_layout(title, body.to_html
 
 ### When to use `view!` vs raw `format!()`
 
-Use the `view!` macro for top-level page bodies and standard page sections. Use raw `format!()` string building for complex, data-driven table rendering where the HTML structure is deeply conditional or involves nested iteration (e.g., message blocks, SSE event tables, tool parameter tables). Functions that return raw HTML strings are injected via `<div inner_html={html_string}/>`.
+Use the `view!` macro for `Page` content fields and standard page sections. Use raw `format!()` string building for complex, data-driven table rendering where the HTML structure is deeply conditional or involves nested iteration. Functions that return raw HTML strings are injected via `<div inner_html={html_string}/>`.
 
 ## CSS
 
-Single embedded `<style>` block in `page_layout()` (`server/src/pages/mod.rs`). **No external CSS, no inline styles.** Monospace font, table-based layout, minimal borders.
+Single embedded `<style>` block in `templates::page_layout()` (`templates/src/lib.rs`). **No external CSS, no inline styles.** Monospace font, table-based layout, minimal borders.
 
 ### Complete CSS reference
 
@@ -89,15 +142,23 @@ details.collapsible[open] > summary .show-less { display: inline; }
 
 ### Adding new styles
 
-Add new CSS classes to the `page_layout()` style block in `server/src/pages/mod.rs`. Never use inline styles. Never add external CSS.
+Add new CSS classes to the style block in `templates::page_layout()` (`templates/src/lib.rs`). Never use inline styles. Never add external CSS.
 
-## Shared helpers (`server/src/pages/mod.rs`)
+## Shared helpers
+
+### Templates crate (`templates/src/lib.rs`)
 
 | Helper | Purpose |
 |--------|---------|
-| `page_layout(title, body_html)` | Wraps body in full HTML document with `<style>` block |
+| `Page { ... }.render()` | Renders a full HTML page with standard sections |
+| `page_layout(title, body_html)` | Low-level wrapper — used internally by `Page::render()` |
 | `html_escape(s)` | Escapes `& < > "` for use in raw HTML strings |
 | `collapsible_block(content, css_class)` | Show-more/show-less for content > 200 chars |
+
+Re-exported by `server/src/pages/mod.rs`:
+```rust
+pub use templates::{collapsible_block, html_escape};
+```
 
 ### `collapsible_block()` behavior
 
@@ -112,20 +173,20 @@ Add new CSS classes to the `page_layout()` style block in `server/src/pages/mod.
 
 | Helper | Purpose |
 |--------|---------|
-| `breadcrumb_html(session, req, current_page)` | Generates `<h1>` breadcrumb for request detail/subpages |
 | `render_kv_table(json_str)` | Renders a JSON object as a Key/Value table with collapsible values |
 | `render_response_headers(req)` | Renders response status + headers as Key/Value table |
 
 ## Page structure pattern
 
-Each page follows this standard section order (all sections optional except breadcrumb):
+The `Page` struct renders sections in this order (empty sections are omitted):
 
-1. `<h1>` breadcrumb — always present
-2. `<h2>"Navigation"</h2>` — action links (Edit, New, Back)
-3. `<h2>"Info"</h2>` — key-value detail table
-4. `<h2>"{Content}"</h2>` — list/content sections with total count
-5. `<h2>"Subpages"</h2>` — Page/Count table linking to child pages
-6. `<h2>"Actions"</h2>` — optional conditional actions (e.g., "Activate" button)
+1. `breadcrumbs` → `<h1>` breadcrumb trail
+2. `nav_links` → `<h2>"Navigation"</h2>` with action links
+3. `info_rows` → `<h2>"Info"</h2>` with key-value table
+4. `content` → custom page content (views, forms, tables, etc.)
+5. `subpages` → `<h2>"Subpages"</h2>` with Page/Count table
+
+Custom `<h2>` sections (e.g., "Actions", list headings with totals) go in the `content` field.
 
 ### Page title format
 
@@ -152,138 +213,76 @@ All top-level entities follow a consistent routing and page pattern:
 /_dashboard/{entity}/{id}/{sub}/{item_id}/delete  # POST: delete item
 ```
 
-**Index page**: breadcrumb, Navigation ("New {Item}", "Back"), item list table with total count.
+**Index page**: breadcrumbs, nav_links ("New {Item}", Back), content = item list table with total count.
 
-**Detail page**: breadcrumb, Navigation ("Edit {Item}", "Back"), Info table (key-value rows), Subpages table (Page/Count links to child pages). May include an optional Actions section after Subpages.
+**Detail page**: breadcrumbs, nav_links ("Edit {Item}", Back), info_rows, subpages. May include conditional actions in content.
 
-**Edit page**: breadcrumb (parent is a link), Navigation ("Back"), form with current values pre-filled, "Save" submit.
+**Edit page**: breadcrumbs (parent is a link), nav_links (Back), content = form with current values pre-filled, "Save" submit.
 
-**Subpage list** (`/{sub}`): breadcrumb (parent detail page is a link), Navigation ("New {Item}", "Back"), items table with total count. Each row shows item fields, an "Edit" link to the edit page, and a Delete button. The add form is **not** on this page — it lives on the separate `/new` subpage.
+**Subpage list** (`/{sub}`): breadcrumbs (parent detail page is a link), nav_links ("New {Item}", Back), content = items table with total count. Each row shows item fields, "Edit" link, and Delete button. The add form lives on the separate `/new` subpage.
 
-**Subpage edit** (`/{sub}/{item_id}/edit`): breadcrumb (parent subpage list is a link), Navigation ("Back"), edit form with current values pre-filled, "Save" submit. POST submits to the same `/{sub}/{item_id}/edit` URL, which redirects back to the list after saving.
+**Subpage edit** (`/{sub}/{item_id}/edit`): breadcrumbs (parent subpage list is a link), nav_links (Back), content = edit form. POST redirects back to the list.
 
-**Subpage add** (`/{sub}/new`): breadcrumb (parent subpage list is a link), Navigation ("Back"), add form, and optional suggested defaults. POST action submits to the parent subpage list URL (`/{sub}`), which redirects back to the list after creating.
+**Subpage add** (`/{sub}/new`): breadcrumbs (parent subpage list is a link), nav_links (Back), content = add form and optional suggested defaults. POST submits to the parent subpage list URL.
 
-**Content subpage**: breadcrumb, Navigation ("Back"), total count (when applicable), content section. These are leaf pages with no Subpages table.
+**Content subpage**: breadcrumbs, nav_links (Back), content = total count + page content. Leaf pages with no subpages.
 
-### Breadcrumb (`<h1>`)
-
-The `<h1>` is a breadcrumb trail. All ancestor pages are `<a>` links; the current (terminal) page is plain text. Separated by `" / "`.
+### Breadcrumbs
 
 ```rust
-// Top-level page (one level below Home):
-<h1>
-    <a href="/_dashboard">"Home"</a>
-    " / "
-    "Items"
-</h1>
-
-// Nested page:
-<h1>
-    <a href="/_dashboard">"Home"</a>
-    " / "
-    <a href="/_dashboard/items">"Items"</a>
-    " / "
-    {format!("Item {}", item.name)}
-</h1>
-
-// Deeply nested page:
-<h1>
-    <a href="/_dashboard">"Home"</a>
-    " / "
-    <a href="/_dashboard/items">"Items"</a>
-    " / "
-    <a href={format!("/_dashboard/items/{}", item.id)}>{format!("Item {}", item.name)}</a>
-    " / "
-    "Children"
-</h1>
+breadcrumbs: vec![
+    Breadcrumb::link("Home", "/_dashboard"),
+    Breadcrumb::link("Items", "/_dashboard/items"),
+    Breadcrumb::current(format!("Item {}", item.name)),
+],
 ```
 
-The Home page itself just uses `<h1>"Home"</h1>` with no links.
+All ancestors are links; the current (terminal) page is plain text. Separated by `" / "`.
 
-For detail pages (under `server/src/pages/detail/`), use the shared `breadcrumb_html()` helper from `server/src/pages/detail/common.rs` to generate the breadcrumb consistently.
-
-### Navigation section (`<h2>"Navigation"</h2>`)
-
-Immediately after the breadcrumb, add a Navigation heading with action links in a single-column table:
+### Navigation links
 
 ```rust
-<h2>"Navigation"</h2>
-<table>
-    <tr><td><a href="/_dashboard/{entity}/new">"New {Item}"</a></td></tr>
-    <tr><td><a href="javascript:history.back()">"Back"</a></td></tr>
-</table>
+nav_links: vec![
+    NavLink::new("New Item", "/_dashboard/items/new"),
+    NavLink::back(),  // always last
+],
 ```
 
-Common navigation actions:
+The Home page has no nav_links — it only has subpages.
 
-- **Create links** — e.g. `"New Item"` pointing to a `/new` route
-- **Edit links** — e.g. `"Edit Item"` pointing to an `/edit` route
-- **Related page links** — links to sibling or related sections
-- **"Back"** — `<a href="javascript:history.back()">` — present on every page except Home, always the **last** link in the table
+### Content field
 
-The Home page has no Navigation section — it only has Subpages.
-
-### Subpages table
-
-The Subpages section uses a two-column table with "Page" and "Count" headers. Count is the number of child items (or empty when not applicable):
+Custom page content goes in `content`. This is where forms, list tables, controls, and conditional actions live:
 
 ```rust
-<h2>"Subpages"</h2>
-<table>
-    <tr>
-        <th>"Page"</th>
-        <th>"Count"</th>
-    </tr>
-    <tr>
-        <td><a href={sub_href}>"Child Items"</a></td>
-        <td>{child_count}</td>
-    </tr>
-</table>
-```
+let content = view! {
+    <h2>"Items"</h2>
+    <p>{format!("Total: {}", items.len())}</p>
+    {if items.is_empty() {
+        Either::Left(view! { <p>"No items yet."</p> })
+    } else {
+        Either::Right(view! { <table>...</table> })
+    }}
+};
 
-### Total count on list sections
-
-Every section that displays a list of items shows a total count immediately after the `<h2>` heading:
-
-```rust
-<h2>"Items"</h2>
-<p>{format!("Total: {}", items.len())}</p>
-{if items.is_empty() {
-    Either::Left(view! { <p>"No items yet."</p> })
-} else {
-    Either::Right(view! { <table>...</table> })
-}}
-```
-
-This applies to all list pages (index pages, subpage item tables) and content subpages.
-
-### Actions section (optional)
-
-Conditionally rendered after Subpages. Uses `Either` to show/hide. Contains POST forms for state-changing actions:
-
-```rust
-{if show_action {
-    Either::Left(view! {
-        <h2>"Actions"</h2>
-        <form method="POST" action={action_url}>
-            <button type="submit">"Action Label"</button>
-        </form>
-    })
-} else {
-    Either::Right(view! {})
-}}
+Page {
+    // ...standard fields...
+    content,
+    // ...
+}
+.render()
 ```
 
 ## Tables
 
 Tables are the primary layout primitive. Types:
 
-### Key-value info table (no headers)
+### Key-value info table
+
+Prefer using `InfoRow` in the `Page` struct for standard info sections. For custom key-value tables in content, use:
 
 ```rust
 <table>
-    <tr><td>"Label"</td><td>{value}</td></tr>
     <tr><td>"Label"</td><td>{value}</td></tr>
 </table>
 ```
@@ -319,7 +318,7 @@ Tables are the primary layout primitive. Types:
 
 ### Nested tables
 
-Tables can be nested for structured data (e.g., tool parameters inside a tools table, key-value pairs inside message cells). No special CSS needed — nested tables inherit the same styles.
+Tables can be nested for structured data. No special CSS needed — nested tables inherit the same styles.
 
 ### Action column pattern
 
@@ -364,10 +363,11 @@ The last column in list tables holds inline actions. Multiple actions are separa
 
 - All `<input>` tags must be self-closing (`<input ... />`) — Leptos `view!` requires this
 - Text inputs use `size="60"` consistently
+- Number inputs use `type="number"` with `min` attribute where appropriate
 - Checkboxes use `value="1"` and `checked={bool_value}` for edit forms
-- Placeholders only where they hint at expected format (e.g. URLs: `placeholder="https://api.example.com"`, auth tokens: `placeholder="Bearer sk-..."`). Do not add placeholders on simple name or pattern fields
+- Placeholders only where they hint at expected format (e.g. URLs, auth tokens). Do not add placeholders on simple name or pattern fields
 - Delete and edit actions always use dedicated routes (`/{item_id}/delete`, `/{item_id}/edit`), never query parameters
-- Submit labels: "Create" for new items, "Save" for edits, "Add Filter" / "Add" for sub-items
+- Submit labels: "Create" for new items, "Save" for edits, "Add" for sub-items
 - Standalone action forms (not in tables): `<form method="POST" action={url}><button type="submit">"Label"</button></form>`
 
 ### Suggestion tables
@@ -396,7 +396,7 @@ The last column in list tables holds inline actions. Multiple actions are separa
         </table>
     })
 } else {
-    Either::Right(view! {})
+    Either::Right(())
 }}
 ```
 
@@ -417,26 +417,25 @@ fn copy_link_html(text: &str) -> String {
 }
 ```
 
-Injected via `<span inner_html={copy_link_html(&url)}/>` after the displayed URL text.
+Injected via `InfoRow::raw()` after the displayed URL text.
 
 ### 2. Back navigation
 
-`<a href="javascript:history.back()">"Back"</a>` — used in the Navigation section on every page except Home.
+`NavLink::back()` renders `<a href="javascript:history.back()">Back</a>` — present on every page except Home, always the last nav link.
 
 ## Auto-refresh
 
-Pages that monitor live data use a meta refresh tag (3-second interval). Controlled by a query parameter toggle link:
+Pages that monitor live data use a meta refresh tag (3-second interval). Placed inside the `content` field:
 
 ```rust
-// Meta tag (inside view! body, before other elements)
-{if auto_refresh {
-    Some(view! { <meta http-equiv="refresh" content="3"/> })
-} else {
-    None
-}}
-
-// Toggle link (near the content section)
-<a href={refresh_toggle_href}>{refresh_toggle_label}</a>
+let content = view! {
+    {if auto_refresh {
+        Some(view! { <meta http-equiv="refresh" content="3"/> })
+    } else {
+        None
+    }}
+    // ... rest of content
+};
 ```
 
 Toggle link text: `"Enable auto-refresh"` / `"Disable auto-refresh"`.
@@ -454,48 +453,24 @@ Content pages may have toggle links above the content for display options:
 
 Controls are rendered as raw HTML strings and injected via `<div inner_html={controls_html}/>`.
 
-## Filtered rows and badges
+## Dimmed rows and badges
 
-For items that match a filter (tool names, system prompt patterns), apply visual dimming:
-
-### Row-level filtering (in raw HTML strings)
+For table rows that should appear visually de-emphasized, use the `.filtered-row` class for opacity and `.filtered-badge` for an inline label:
 
 ```rust
-let filtered = filters.iter().any(|f| f == name);
-let row_class = if filtered { " class=\"filtered-row\"" } else { "" };
-
-// Name cell with badge
-let name_html = if filtered {
-    format!(
-        "{} <span class=\"filtered-badge\">[FILTERED]</span>",
-        html_escape(name)
-    )
+let row_class = if dimmed { " class=\"filtered-row\"" } else { "" };
+let badge = if dimmed {
+    " <span class=\"filtered-badge\">[FILTERED]</span>"
 } else {
-    html_escape(name)
+    ""
 };
 
-html.push_str(&format!("<tr{}><td>{}</td>...</tr>", row_class, name_html));
-```
-
-### Regex-based filter matching
-
-System filters support regex patterns with plain-string fallback:
-
-```rust
-fn matched_filter<'a>(text: &str, filters: &'a [String]) -> Option<&'a str> {
-    filters.iter().find_map(|f| {
-        let matched = match Regex::new(f) {
-            Ok(re) => re.is_match(text),
-            Err(_) => text.contains(f.as_str()),
-        };
-        if matched { Some(f.as_str()) } else { None }
-    })
-}
+html.push_str(&format!("<tr{}><td>{}{}</td>...</tr>", row_class, html_escape(name), badge));
 ```
 
 ## JSON and code display
 
-Three rendering strategies based on data shape:
+Rendering strategies based on data shape:
 
 | Strategy | When to use | Implementation |
 |----------|-------------|----------------|
@@ -504,47 +479,9 @@ Three rendering strategies based on data shape:
 | Readonly textarea | Full request JSON | `<textarea readonly rows="30" cols="80" wrap="off">{html_escape(json)}</textarea>` |
 | Collapsible block | Long text in table cells | `collapsible_block(text, "")` (200-char threshold) |
 
-### SSE raw data pattern
-
-For collapsible raw JSON in SSE event tables, use a minimal `<details>` with "show raw" label:
-
-```rust
-let raw_html = format!(
-    r#"<details class="collapsible"><summary><span class="show-more">show raw</span></summary><pre class="collapsible-full">{}</pre></details>"#,
-    html_escape(&formatted_json),
-);
-```
-
 ## Text preview truncation
 
-When showing previews of long content in list tables:
-
-| Context | Max chars | Format |
-|---------|-----------|--------|
-| Last user message | 80 | `"{text}..."` |
-| Tool use params | 40 | `"tool_use({name}): {params}..."` |
-| Tool result | 60 | `"tool_result: {text}..."` |
-| Thinking preview | 40 | `"thinking: {text}..."` |
-| Generic text block | 60 | `"{text}..."` |
-
-Newlines in previews are replaced with spaces: `text.replace('\n', " ")`.
-
-## Cache control labels
-
-Message blocks with `cache_control` field show an inline label:
-
-```rust
-fn cache_control_label(block: &serde_json::Value) -> String {
-    block
-        .get("cache_control")
-        .and_then(|c| c.get("type"))
-        .and_then(|t| t.as_str())
-        .map(|t| format!(" (cache: {})", html_escape(t)))
-        .unwrap_or_default()
-}
-```
-
-Appended to the block type cell: `"text (cache: ephemeral)"`.
+When showing previews of long content in list tables, truncate with `"..."` suffix. Replace newlines with spaces: `text.replace('\n', " ")`.
 
 ## HTML escaping
 
@@ -558,5 +495,5 @@ Always escape dynamic content in raw HTML strings using `html_escape()`. The fun
 
 Simple text strings, no special styling:
 - Active/inactive states: `"active"` / `"inactive"` / `"--"`
-- Timestamps: Displayed as-is from the database (ISO 8601 format), no client-side formatting
+- Timestamps: Displayed as-is from the database, no client-side formatting
 - Empty/missing values: `String::new()` or `.unwrap_or_default()`

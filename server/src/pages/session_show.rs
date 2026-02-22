@@ -43,12 +43,12 @@ pub fn render_session_show(session: &Session, port: u16) -> String {
             ),
             InfoRow::new("Target", &session.target_url),
         ],
+        content: (),
         subpages: vec![Subpage::new(
             "Requests",
             format!("/_dashboard/sessions/{}/requests", session.id),
             session.request_count,
         )],
-        ..Default::default()
     }
     .render()
 }

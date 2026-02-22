@@ -1,25 +1,16 @@
 use leptos::either::Either;
 use leptos::prelude::*;
 
-use crate::pages::page_layout;
 use common::models::{FilterProfile, SystemFilter, ToolFilter};
+use templates::{Breadcrumb, InfoRow, NavLink, Page, Subpage};
 
 pub fn render_filters_index(profiles: &[FilterProfile], active_profile_id: &str) -> String {
     let profiles = profiles.to_vec();
     let empty = profiles.is_empty();
     let total = profiles.len();
     let active_profile_id = active_profile_id.to_string();
-    let body = view! {
-        <h1>
-            <a href="/_dashboard">"Home"</a>
-            " / "
-            "Filters"
-        </h1>
-        <h2>"Navigation"</h2>
-        <table>
-            <tr><td><a href="/_dashboard/filters/new">"New Profile"</a></td></tr>
-            <tr><td><a href="javascript:history.back()">"Back"</a></td></tr>
-        </table>
+
+    let content = view! {
         <h2>"Profiles"</h2>
         <p>{format!("Total: {}", total)}</p>
         {if empty {
@@ -70,22 +61,26 @@ pub fn render_filters_index(profiles: &[FilterProfile], active_profile_id: &str)
             })
         }}
     };
-    page_layout("Gateway Proxy - Filters", body.to_html())
+
+    Page {
+        title: "Gateway Proxy - Filters".to_string(),
+        breadcrumbs: vec![
+            Breadcrumb::link("Home", "/_dashboard"),
+            Breadcrumb::current("Filters"),
+        ],
+        nav_links: vec![
+            NavLink::new("New Profile", "/_dashboard/filters/new"),
+            NavLink::back(),
+        ],
+        info_rows: vec![],
+        content,
+        subpages: vec![],
+    }
+    .render()
 }
 
 pub fn render_new_profile() -> String {
-    let body = view! {
-        <h1>
-            <a href="/_dashboard">"Home"</a>
-            " / "
-            <a href="/_dashboard/filters">"Filters"</a>
-            " / "
-            "New Profile"
-        </h1>
-        <h2>"Navigation"</h2>
-        <table>
-            <tr><td><a href="javascript:history.back()">"Back"</a></td></tr>
-        </table>
+    let form = view! {
         <h2>"New Profile"</h2>
         <form method="POST" action="/_dashboard/filters/new">
             <table>
@@ -100,7 +95,20 @@ pub fn render_new_profile() -> String {
             </table>
         </form>
     };
-    page_layout("Gateway Proxy - New Profile", body.to_html())
+
+    Page {
+        title: "Gateway Proxy - New Profile".to_string(),
+        breadcrumbs: vec![
+            Breadcrumb::link("Home", "/_dashboard"),
+            Breadcrumb::link("Filters", "/_dashboard/filters"),
+            Breadcrumb::current("New Profile"),
+        ],
+        nav_links: vec![NavLink::back()],
+        content: form,
+        info_rows: vec![],
+        subpages: vec![],
+    }
+    .render()
 }
 
 pub fn render_profile_show(
@@ -108,95 +116,78 @@ pub fn render_profile_show(
     active_profile_id: &str,
     system_count: i64,
     tool_count: i64,
+    keep_tool_pairs: i64,
 ) -> String {
     let profile = profile.clone();
     let is_active = profile.id.to_string() == active_profile_id;
     let profile_name = profile.name.clone();
-    let edit_href = format!("/_dashboard/filters/{}/edit", profile.id);
-    let system_href = format!("/_dashboard/filters/{}/system", profile.id);
-    let tools_href = format!("/_dashboard/filters/{}/tools", profile.id);
-    let activate_action = format!("/_dashboard/filters/{}/activate", profile.id);
-
-    let body = view! {
-        <h1>
-            <a href="/_dashboard">"Home"</a>
-            " / "
-            <a href="/_dashboard/filters">"Filters"</a>
-            " / "
-            {format!("Profile {}", profile_name)}
-        </h1>
-        <h2>"Navigation"</h2>
-        <table>
-            <tr><td><a href={edit_href}>"Edit Profile"</a></td></tr>
-            <tr><td><a href="javascript:history.back()">"Back"</a></td></tr>
-        </table>
-        <h2>"Info"</h2>
-        <table>
-            <tr>
-                <td>"Name"</td>
-                <td>{profile.name}</td>
-            </tr>
-            <tr>
-                <td>"Status"</td>
-                <td>{if is_active { "active" } else { "inactive" }}</td>
-            </tr>
-            <tr>
-                <td>"Created"</td>
-                <td>{profile.created_at.unwrap_or_default()}</td>
-            </tr>
-        </table>
-        <h2>"Subpages"</h2>
-        <table>
-            <tr>
-                <th>"Page"</th>
-                <th>"Count"</th>
-            </tr>
-            <tr>
-                <td><a href={system_href}>"System Filters"</a></td>
-                <td>{system_count}</td>
-            </tr>
-            <tr>
-                <td><a href={tools_href}>"Tool Filters"</a></td>
-                <td>{tool_count}</td>
-            </tr>
-        </table>
-        {if !is_active {
-            Either::Left(view! {
-                <h2>"Actions"</h2>
-                <form method="POST" action={activate_action}>
-                    <button type="submit">"Activate"</button>
-                </form>
-            })
-        } else {
-            Either::Right(())
-        }}
+    let profile_id = profile.id.to_string();
+    let activate_action = format!("/_dashboard/filters/{}/activate", profile_id);
+    let message_filter_label = if keep_tool_pairs > 0 {
+        format!("keep last {}", keep_tool_pairs)
+    } else {
+        "off".to_string()
     };
-    page_layout(
-        &format!("Gateway Proxy - Profile {}", profile_name),
-        body.to_html(),
-    )
+
+    let actions = if !is_active {
+        Either::Left(view! {
+            <h2>"Actions"</h2>
+            <form method="POST" action={activate_action}>
+                <button type="submit">"Activate"</button>
+            </form>
+        })
+    } else {
+        Either::Right(())
+    };
+
+    Page {
+        title: format!("Gateway Proxy - Profile {}", profile_name),
+        breadcrumbs: vec![
+            Breadcrumb::link("Home", "/_dashboard"),
+            Breadcrumb::link("Filters", "/_dashboard/filters"),
+            Breadcrumb::current(format!("Profile {}", profile_name)),
+        ],
+        nav_links: vec![
+            NavLink::new(
+                "Edit Profile",
+                format!("/_dashboard/filters/{}/edit", profile_id),
+            ),
+            NavLink::back(),
+        ],
+        info_rows: vec![
+            InfoRow::new("Name", &profile.name),
+            InfoRow::new("Status", if is_active { "active" } else { "inactive" }),
+            InfoRow::new("Created", &profile.created_at.unwrap_or_default()),
+        ],
+        content: actions,
+        subpages: vec![
+            Subpage::new(
+                "System Filters",
+                format!("/_dashboard/filters/{}/system", profile_id),
+                system_count,
+            ),
+            Subpage::new(
+                "Tool Filters",
+                format!("/_dashboard/filters/{}/tools", profile_id),
+                tool_count,
+            ),
+            Subpage::new(
+                "Message Filters",
+                format!("/_dashboard/filters/{}/messages", profile_id),
+                message_filter_label,
+            ),
+        ],
+    }
+    .render()
 }
 
 pub fn render_profile_edit(profile: &FilterProfile) -> String {
     let profile = profile.clone();
     let profile_name = profile.name.clone();
-    let edit_action = format!("/_dashboard/filters/{}/edit", profile.id);
-    let back_href = format!("/_dashboard/filters/{}", profile.id);
+    let profile_id = profile.id.to_string();
+    let edit_action = format!("/_dashboard/filters/{}/edit", profile_id);
 
-    let body = view! {
-        <h1>
-            <a href="/_dashboard">"Home"</a>
-            " / "
-            <a href="/_dashboard/filters">"Filters"</a>
-            " / "
-            <a href={back_href}>{format!("Profile {}", profile_name)}</a>
-            " / "
-            "Edit"
-        </h1>
-        <h2>"Navigation"</h2>
-        <table>
-            <tr><td><a href="javascript:history.back()">"Back"</a></td></tr>
-        </table>
+    let form = view! {
         <h2>"Edit Profile"</h2>
         <form method="POST" action={edit_action}>
             <table>
@@ -211,37 +202,34 @@ pub fn render_profile_edit(profile: &FilterProfile) -> String {
             </table>
         </form>
     };
-    page_layout(
-        &format!("Gateway Proxy - Edit Profile {}", profile_name),
-        body.to_html(),
-    )
+
+    Page {
+        title: format!("Gateway Proxy - Edit Profile {}", profile_name),
+        breadcrumbs: vec![
+            Breadcrumb::link("Home", "/_dashboard"),
+            Breadcrumb::link("Filters", "/_dashboard/filters"),
+            Breadcrumb::link(
+                format!("Profile {}", profile_name),
+                format!("/_dashboard/filters/{}", profile_id),
+            ),
+            Breadcrumb::current("Edit"),
+        ],
+        nav_links: vec![NavLink::back()],
+        content: form,
+        info_rows: vec![],
+        subpages: vec![],
+    }
+    .render()
 }
 
 pub fn render_profile_system(profile: &FilterProfile, system_filters: &[SystemFilter]) -> String {
-    let profile = profile.clone();
     let profile_name = profile.name.clone();
     let profile_id = profile.id.to_string();
     let system_filters = system_filters.to_vec();
     let system_total = system_filters.len();
     let system_empty = system_filters.is_empty();
-    let back_href = format!("/_dashboard/filters/{}", profile_id);
-    let new_href = format!("/_dashboard/filters/{}/system/new", profile_id);
 
-    let body = view! {
-        <h1>
-            <a href="/_dashboard">"Home"</a>
-            " / "
-            <a href="/_dashboard/filters">"Filters"</a>
-            " / "
-            <a href={back_href}>{format!("Profile {}", profile_name)}</a>
-            " / "
-            "System Filters"
-        </h1>
-        <h2>"Navigation"</h2>
-        <table>
-            <tr><td><a href={new_href}>"New System Filter"</a></td></tr>
-            <tr><td><a href="javascript:history.back()">"Back"</a></td></tr>
-        </table>
+    let content = view! {
         <h2>"System Filters"</h2>
         <p>{format!("Total: {}", system_total)}</p>
         {if system_empty {
@@ -280,22 +268,39 @@ pub fn render_profile_system(profile: &FilterProfile, system_filters: &[SystemFi
             })
         }}
     };
-    page_layout(
-        &format!("Gateway Proxy - {} System Filters", profile_name),
-        body.to_html(),
-    )
+
+    Page {
+        title: format!("Gateway Proxy - {} System Filters", profile_name),
+        breadcrumbs: vec![
+            Breadcrumb::link("Home", "/_dashboard"),
+            Breadcrumb::link("Filters", "/_dashboard/filters"),
+            Breadcrumb::link(
+                format!("Profile {}", profile_name),
+                format!("/_dashboard/filters/{}", profile_id),
+            ),
+            Breadcrumb::current("System Filters"),
+        ],
+        nav_links: vec![
+            NavLink::new(
+                "New System Filter",
+                format!("/_dashboard/filters/{}/system/new", profile_id),
+            ),
+            NavLink::back(),
+        ],
+        content,
+        info_rows: vec![],
+        subpages: vec![],
+    }
+    .render()
 }
 
 pub fn render_profile_system_new(
     profile: &FilterProfile,
     system_filters: &[SystemFilter],
 ) -> String {
-    let profile = profile.clone();
     let profile_name = profile.name.clone();
     let profile_id = profile.id.to_string();
     let form_action = format!("/_dashboard/filters/{}/system", profile_id);
-    let profile_href = format!("/_dashboard/filters/{}", profile_id);
-    let system_href = format!("/_dashboard/filters/{}/system", profile_id);
 
     let existing_patterns: Vec<String> = system_filters.iter().map(|f| f.pattern.clone()).collect();
     let system_suggestions: Vec<&&str> = db::DEFAULT_FILTER_SUGGESTIONS
@@ -304,22 +309,7 @@ pub fn render_profile_system_new(
         .collect();
     let has_suggestions = !system_suggestions.is_empty();
 
-    let body = view! {
-        <h1>
-            <a href="/_dashboard">"Home"</a>
-            " / "
-            <a href="/_dashboard/filters">"Filters"</a>
-            " / "
-            <a href={profile_href}>{format!("Profile {}", profile_name)}</a>
-            " / "
-            <a href={system_href}>"System Filters"</a>
-            " / "
-            "New"
-        </h1>
-        <h2>"Navigation"</h2>
-        <table>
-            <tr><td><a href="javascript:history.back()">"Back"</a></td></tr>
-        </table>
+    let content = view! {
         <h2>"New System Filter"</h2>
         <form method="POST" action={form_action.clone()}>
             <table>
@@ -357,37 +347,38 @@ pub fn render_profile_system_new(
             Either::Right(())
         }}
     };
-    page_layout(
-        &format!("Gateway Proxy - {} New System Filter", profile_name),
-        body.to_html(),
-    )
+
+    Page {
+        title: format!("Gateway Proxy - {} New System Filter", profile_name),
+        breadcrumbs: vec![
+            Breadcrumb::link("Home", "/_dashboard"),
+            Breadcrumb::link("Filters", "/_dashboard/filters"),
+            Breadcrumb::link(
+                format!("Profile {}", profile_name),
+                format!("/_dashboard/filters/{}", profile_id),
+            ),
+            Breadcrumb::link(
+                "System Filters",
+                format!("/_dashboard/filters/{}/system", profile_id),
+            ),
+            Breadcrumb::current("New"),
+        ],
+        nav_links: vec![NavLink::back()],
+        content,
+        info_rows: vec![],
+        subpages: vec![],
+    }
+    .render()
 }
 
 pub fn render_profile_tools(profile: &FilterProfile, tool_filters: &[ToolFilter]) -> String {
-    let profile = profile.clone();
     let profile_name = profile.name.clone();
     let profile_id = profile.id.to_string();
     let tool_filters = tool_filters.to_vec();
     let tool_total = tool_filters.len();
     let tool_empty = tool_filters.is_empty();
-    let back_href = format!("/_dashboard/filters/{}", profile_id);
-    let new_href = format!("/_dashboard/filters/{}/tools/new", profile_id);
 
-    let body = view! {
-        <h1>
-            <a href="/_dashboard">"Home"</a>
-            " / "
-            <a href="/_dashboard/filters">"Filters"</a>
-            " / "
-            <a href={back_href}>{format!("Profile {}", profile_name)}</a>
-            " / "
-            "Tool Filters"
-        </h1>
-        <h2>"Navigation"</h2>
-        <table>
-            <tr><td><a href={new_href}>"New Tool Filter"</a></td></tr>
-            <tr><td><a href="javascript:history.back()">"Back"</a></td></tr>
-        </table>
+    let content = view! {
         <h2>"Tool Filters"</h2>
         <p>{format!("Total: {}", tool_total)}</p>
         {if tool_empty {
@@ -426,19 +417,36 @@ pub fn render_profile_tools(profile: &FilterProfile, tool_filters: &[ToolFilter]
             })
         }}
     };
-    page_layout(
-        &format!("Gateway Proxy - {} Tool Filters", profile_name),
-        body.to_html(),
-    )
+
+    Page {
+        title: format!("Gateway Proxy - {} Tool Filters", profile_name),
+        breadcrumbs: vec![
+            Breadcrumb::link("Home", "/_dashboard"),
+            Breadcrumb::link("Filters", "/_dashboard/filters"),
+            Breadcrumb::link(
+                format!("Profile {}", profile_name),
+                format!("/_dashboard/filters/{}", profile_id),
+            ),
+            Breadcrumb::current("Tool Filters"),
+        ],
+        nav_links: vec![
+            NavLink::new(
+                "New Tool Filter",
+                format!("/_dashboard/filters/{}/tools/new", profile_id),
+            ),
+            NavLink::back(),
+        ],
+        content,
+        info_rows: vec![],
+        subpages: vec![],
+    }
+    .render()
 }
 
 pub fn render_profile_tools_new(profile: &FilterProfile, tool_filters: &[ToolFilter]) -> String {
-    let profile = profile.clone();
     let profile_name = profile.name.clone();
     let profile_id = profile.id.to_string();
     let form_action = format!("/_dashboard/filters/{}/tools", profile_id);
-    let profile_href = format!("/_dashboard/filters/{}", profile_id);
-    let tools_href = format!("/_dashboard/filters/{}/tools", profile_id);
 
     let existing_names: Vec<String> = tool_filters.iter().map(|f| f.name.clone()).collect();
     let tool_suggestions: Vec<&&str> = db::DEFAULT_TOOL_FILTER_SUGGESTIONS
@@ -447,22 +455,7 @@ pub fn render_profile_tools_new(profile: &FilterProfile, tool_filters: &[ToolFil
         .collect();
     let has_suggestions = !tool_suggestions.is_empty();
 
-    let body = view! {
-        <h1>
-            <a href="/_dashboard">"Home"</a>
-            " / "
-            <a href="/_dashboard/filters">"Filters"</a>
-            " / "
-            <a href={profile_href}>{format!("Profile {}", profile_name)}</a>
-            " / "
-            <a href={tools_href}>"Tool Filters"</a>
-            " / "
-            "New"
-        </h1>
-        <h2>"Navigation"</h2>
-        <table>
-            <tr><td><a href="javascript:history.back()">"Back"</a></td></tr>
-        </table>
+    let content = view! {
         <h2>"New Tool Filter"</h2>
         <form method="POST" action={form_action.clone()}>
             <table>
@@ -500,39 +493,40 @@ pub fn render_profile_tools_new(profile: &FilterProfile, tool_filters: &[ToolFil
             Either::Right(())
         }}
     };
-    page_layout(
-        &format!("Gateway Proxy - {} New Tool Filter", profile_name),
-        body.to_html(),
-    )
+
+    Page {
+        title: format!("Gateway Proxy - {} New Tool Filter", profile_name),
+        breadcrumbs: vec![
+            Breadcrumb::link("Home", "/_dashboard"),
+            Breadcrumb::link("Filters", "/_dashboard/filters"),
+            Breadcrumb::link(
+                format!("Profile {}", profile_name),
+                format!("/_dashboard/filters/{}", profile_id),
+            ),
+            Breadcrumb::link(
+                "Tool Filters",
+                format!("/_dashboard/filters/{}/tools", profile_id),
+            ),
+            Breadcrumb::current("New"),
+        ],
+        nav_links: vec![NavLink::back()],
+        content,
+        info_rows: vec![],
+        subpages: vec![],
+    }
+    .render()
 }
 
 pub fn render_system_filter_edit(profile: &FilterProfile, filter: &SystemFilter) -> String {
     let profile_name = profile.name.clone();
     let profile_id = profile.id.to_string();
     let filter_id = filter.id.to_string();
-    let profile_href = format!("/_dashboard/filters/{}", profile_id);
-    let system_href = format!("/_dashboard/filters/{}/system", profile_id);
     let edit_action = format!(
         "/_dashboard/filters/{}/system/{}/edit",
         profile_id, filter_id
     );
 
-    let body = view! {
-        <h1>
-            <a href="/_dashboard">"Home"</a>
-            " / "
-            <a href="/_dashboard/filters">"Filters"</a>
-            " / "
-            <a href={profile_href}>{format!("Profile {}", profile_name)}</a>
-            " / "
-            <a href={system_href}>"System Filters"</a>
-            " / "
-            "Edit"
-        </h1>
-        <h2>"Navigation"</h2>
-        <table>
-            <tr><td><a href="javascript:history.back()">"Back"</a></td></tr>
-        </table>
+    let form = view! {
         <h2>"Edit System Filter"</h2>
         <form method="POST" action={edit_action}>
             <table>
@@ -547,36 +541,40 @@ pub fn render_system_filter_edit(profile: &FilterProfile, filter: &SystemFilter)
             </table>
         </form>
     };
-    page_layout("Gateway Proxy - Edit System Filter", body.to_html())
+
+    Page {
+        title: "Gateway Proxy - Edit System Filter".to_string(),
+        breadcrumbs: vec![
+            Breadcrumb::link("Home", "/_dashboard"),
+            Breadcrumb::link("Filters", "/_dashboard/filters"),
+            Breadcrumb::link(
+                format!("Profile {}", profile_name),
+                format!("/_dashboard/filters/{}", profile_id),
+            ),
+            Breadcrumb::link(
+                "System Filters",
+                format!("/_dashboard/filters/{}/system", profile_id),
+            ),
+            Breadcrumb::current("Edit"),
+        ],
+        nav_links: vec![NavLink::back()],
+        content: form,
+        info_rows: vec![],
+        subpages: vec![],
+    }
+    .render()
 }
 
 pub fn render_tool_filter_edit(profile: &FilterProfile, filter: &ToolFilter) -> String {
     let profile_name = profile.name.clone();
     let profile_id = profile.id.to_string();
     let filter_id = filter.id.to_string();
-    let profile_href = format!("/_dashboard/filters/{}", profile_id);
-    let tools_href = format!("/_dashboard/filters/{}/tools", profile_id);
     let edit_action = format!(
         "/_dashboard/filters/{}/tools/{}/edit",
         profile_id, filter_id
     );
 
-    let body = view! {
-        <h1>
-            <a href="/_dashboard">"Home"</a>
-            " / "
-            <a href="/_dashboard/filters">"Filters"</a>
-            " / "
-            <a href={profile_href}>{format!("Profile {}", profile_name)}</a>
-            " / "
-            <a href={tools_href}>"Tool Filters"</a>
-            " / "
-            "Edit"
-        </h1>
-        <h2>"Navigation"</h2>
-        <table>
-            <tr><td><a href="javascript:history.back()">"Back"</a></td></tr>
-        </table>
+    let form = view! {
         <h2>"Edit Tool Filter"</h2>
         <form method="POST" action={edit_action}>
             <table>
@@ -591,5 +589,67 @@ pub fn render_tool_filter_edit(profile: &FilterProfile, filter: &ToolFilter) -> 
             </table>
         </form>
     };
-    page_layout("Gateway Proxy - Edit Tool Filter", body.to_html())
+
+    Page {
+        title: "Gateway Proxy - Edit Tool Filter".to_string(),
+        breadcrumbs: vec![
+            Breadcrumb::link("Home", "/_dashboard"),
+            Breadcrumb::link("Filters", "/_dashboard/filters"),
+            Breadcrumb::link(
+                format!("Profile {}", profile_name),
+                format!("/_dashboard/filters/{}", profile_id),
+            ),
+            Breadcrumb::link(
+                "Tool Filters",
+                format!("/_dashboard/filters/{}/tools", profile_id),
+            ),
+            Breadcrumb::current("Edit"),
+        ],
+        nav_links: vec![NavLink::back()],
+        content: form,
+        info_rows: vec![],
+        subpages: vec![],
+    }
+    .render()
+}
+
+pub fn render_profile_messages(profile: &FilterProfile, keep_tool_pairs: i64) -> String {
+    let profile_name = profile.name.clone();
+    let profile_id = profile.id.to_string();
+    let form_action = format!("/_dashboard/filters/{}/messages", profile_id);
+
+    let content = view! {
+        <h2>"Message Filters"</h2>
+        <p>"Controls how many tool_use/tool_result pairs to keep in forwarded requests. Set to 0 to disable (keep all)."</p>
+        <form method="POST" action={form_action}>
+            <table>
+                <tr>
+                    <td><label>"Keep last N tool pairs"</label></td>
+                    <td><input type="number" name="keep_tool_pairs" min="0" value={keep_tool_pairs.to_string()} size="10"/></td>
+                </tr>
+                <tr>
+                    <td></td>
+                    <td><input type="submit" value="Save"/></td>
+                </tr>
+            </table>
+        </form>
+    };
+
+    Page {
+        title: format!("Gateway Proxy - {} Message Filters", profile_name),
+        breadcrumbs: vec![
+            Breadcrumb::link("Home", "/_dashboard"),
+            Breadcrumb::link("Filters", "/_dashboard/filters"),
+            Breadcrumb::link(
+                format!("Profile {}", profile_name),
+                format!("/_dashboard/filters/{}", profile_id),
+            ),
+            Breadcrumb::current("Message Filters"),
+        ],
+        nav_links: vec![NavLink::back()],
+        content,
+        info_rows: vec![],
+        subpages: vec![],
+    }
+    .render()
 }

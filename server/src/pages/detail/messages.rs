@@ -1,8 +1,32 @@
 use crate::pages::{collapsible_block, html_escape};
 
-pub fn render_messages(json_str: &str, order: &str) -> String {
+pub fn render_messages(json_str: &str, order: &str, keep_tool_pairs: i64) -> String {
     let Ok(mut msgs) = serde_json::from_str::<Vec<serde_json::Value>>(json_str) else {
         return format!("<pre>{}</pre>", html_escape(json_str));
+    };
+
+    // Collect tool_use IDs to determine which are filtered
+    let filtered_ids: std::collections::HashSet<String> = if keep_tool_pairs > 0 {
+        let mut all_ids: Vec<String> = Vec::new();
+        for msg in &msgs {
+            if let Some(blocks) = msg.get("content").and_then(|c| c.as_array()) {
+                for block in blocks {
+                    if block.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
+                        if let Some(id) = block.get("id").and_then(|i| i.as_str()) {
+                            all_ids.push(id.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        let keep = keep_tool_pairs as usize;
+        if all_ids.len() > keep {
+            all_ids[..all_ids.len() - keep].iter().cloned().collect()
+        } else {
+            std::collections::HashSet::new()
+        }
+    } else {
+        std::collections::HashSet::new()
     };
 
     if order == "desc" {
@@ -31,6 +55,33 @@ pub fn render_messages(json_str: &str, order: &str) -> String {
                 } else {
                     String::new()
                 };
+
+                // Determine if this block is filtered
+                let is_filtered = match btype {
+                    "tool_use" => {
+                        let id = block.get("id").and_then(|i| i.as_str()).unwrap_or("");
+                        filtered_ids.contains(id)
+                    }
+                    "tool_result" => {
+                        let id = block
+                            .get("tool_use_id")
+                            .and_then(|i| i.as_str())
+                            .unwrap_or("");
+                        filtered_ids.contains(id)
+                    }
+                    _ => false,
+                };
+                let row_class = if is_filtered {
+                    " class=\"filtered-row\""
+                } else {
+                    ""
+                };
+                let filtered_badge = if is_filtered {
+                    " <span class=\"filtered-badge\">[FILTERED]</span>"
+                } else {
+                    ""
+                };
+
                 match btype {
                     "text" => {
                         let text = block.get("text").and_then(|t| t.as_str()).unwrap_or("");
@@ -74,9 +125,11 @@ pub fn render_messages(json_str: &str, order: &str) -> String {
                             params_html.push_str("</table>");
                         }
                         html.push_str(&format!(
-                            "<tr><td>{}</td><td>tool_use{}: {} {}</td><td>{}</td></tr>",
+                            "<tr{}><td>{}</td><td>tool_use{}{}: {} {}</td><td>{}</td></tr>",
+                            row_class,
                             role_cell,
                             cache_info,
+                            filtered_badge,
                             html_escape(name),
                             html_escape(id),
                             params_html
@@ -101,9 +154,11 @@ pub fn render_messages(json_str: &str, order: &str) -> String {
                             String::new()
                         };
                         html.push_str(&format!(
-                            "<tr><td>{}</td><td>tool_result{} {}</td><td>{}</td></tr>",
+                            "<tr{}><td>{}</td><td>tool_result{}{} {}</td><td>{}</td></tr>",
+                            row_class,
                             role_cell,
                             cache_info,
+                            filtered_badge,
                             html_escape(tool_use_id),
                             collapsible_block(&result_text, "")
                         ));

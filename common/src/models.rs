@@ -65,3 +65,10 @@ pub struct ToolFilter {
     pub name: String,
     pub created_at: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct MessageFilter {
+    #[sqlx(try_from = "String")]
+    pub profile_id: uuid::Uuid,
+    pub keep_tool_pairs: i64,
+}

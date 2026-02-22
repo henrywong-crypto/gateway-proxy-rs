@@ -1,25 +1,15 @@
 use leptos::either::Either;
 use leptos::prelude::*;
 
-use crate::pages::page_layout;
 use common::models::Session;
-use templates::{Breadcrumb, NavLink, Page};
+use templates::{Breadcrumb, InfoRow, NavLink, Page, Subpage};
 
 pub fn render_sessions_index(sessions: &[Session]) -> String {
     let sessions = sessions.to_vec();
     let empty = sessions.is_empty();
     let total = sessions.len();
-    let body = view! {
-        <h1>
-            <a href="/_dashboard">"Home"</a>
-            " / "
-            "Sessions"
-        </h1>
-        <h2>"Navigation"</h2>
-        <table>
-            <tr><td><a href="/_dashboard/sessions/new">"New Session"</a></td></tr>
-            <tr><td><a href="javascript:history.back()">"Back"</a></td></tr>
-        </table>
+
+    let content = view! {
         <h2>"Sessions"</h2>
         <p>{format!("Total: {}", total)}</p>
         {if empty {
@@ -65,7 +55,22 @@ pub fn render_sessions_index(sessions: &[Session]) -> String {
             })
         }}
     };
-    page_layout("Gateway Proxy - Sessions", body.to_html())
+
+    Page {
+        title: "Gateway Proxy - Sessions".to_string(),
+        breadcrumbs: vec![
+            Breadcrumb::link("Home", "/_dashboard"),
+            Breadcrumb::current("Sessions"),
+        ],
+        nav_links: vec![
+            NavLink::new("New Session", "/_dashboard/sessions/new"),
+            NavLink::back(),
+        ],
+        info_rows: vec![],
+        content,
+        subpages: vec![],
+    }
+    .render()
 }
 
 pub fn render_new_session() -> String {
@@ -117,32 +122,10 @@ pub fn render_edit_session(session: &Session, port: u16) -> String {
     let session_name = session.name.clone();
     let edit_action = format!("/_dashboard/sessions/{}/edit", session.id);
     let proxy_url = format!("http://localhost:{}/_proxy/{}/", port, session.id);
-    let requests_href = format!("/_dashboard/sessions/{}/requests", session.id);
-    let back_href = format!("/_dashboard/sessions/{}", session.id);
     let tls_disabled = session.tls_verify_disabled;
     let auth_header_val = session.auth_header.clone().unwrap_or_default();
 
-    let body = view! {
-        <h1>
-            <a href="/_dashboard">"Home"</a>
-            " / "
-            <a href="/_dashboard/sessions">"Sessions"</a>
-            " / "
-            <a href={back_href.clone()}>{format!("Session {}", session_name)}</a>
-            " / "
-            "Edit"
-        </h1>
-        <h2>"Navigation"</h2>
-        <table>
-            <tr><td><a href="javascript:history.back()">"Back"</a></td></tr>
-        </table>
-        <h2>"Info"</h2>
-        <table>
-            <tr>
-                <td>"Proxy URL"</td>
-                <td>{proxy_url}</td>
-            </tr>
-        </table>
+    let form = view! {
         <h2>"Edit Session"</h2>
         <form method="POST" action={edit_action}>
             <table>
@@ -168,21 +151,27 @@ pub fn render_edit_session(session: &Session, port: u16) -> String {
                 </tr>
             </table>
         </form>
-        <h2>"Subpages"</h2>
-        <table>
-            <tr>
-                <th>"Page"</th>
-                <th>"Count"</th>
-            </tr>
-            <tr>
-                <td><a href={requests_href}>"Requests"</a></td>
-                <td>{session.request_count}</td>
-            </tr>
-        </table>
     };
 
-    page_layout(
-        &format!("Gateway Proxy - Edit Session {}", session_name),
-        body.to_html(),
-    )
+    Page {
+        title: format!("Gateway Proxy - Edit Session {}", session_name),
+        breadcrumbs: vec![
+            Breadcrumb::link("Home", "/_dashboard"),
+            Breadcrumb::link("Sessions", "/_dashboard/sessions"),
+            Breadcrumb::link(
+                format!("Session {}", session_name),
+                format!("/_dashboard/sessions/{}", session.id),
+            ),
+            Breadcrumb::current("Edit"),
+        ],
+        nav_links: vec![NavLink::back()],
+        info_rows: vec![InfoRow::new("Proxy URL", &proxy_url)],
+        content: form,
+        subpages: vec![Subpage::new(
+            "Requests",
+            format!("/_dashboard/sessions/{}/requests", session.id),
+            session.request_count,
+        )],
+    }
+    .render()
 }

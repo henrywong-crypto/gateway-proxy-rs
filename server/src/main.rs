@@ -149,6 +149,14 @@ async fn main() -> anyhow::Result<()> {
                 web::post().to(handlers::tool_filter_delete),
             )
             .route(
+                "/_dashboard/filters/{id}/messages",
+                web::get().to(handlers::filter_profile_messages),
+            )
+            .route(
+                "/_dashboard/filters/{id}/messages",
+                web::post().to(handlers::filter_profile_messages_post),
+            )
+            .route(
                 "/_dashboard/sessions/{id}/requests",
                 web::get().to(handlers::requests_index),
             )

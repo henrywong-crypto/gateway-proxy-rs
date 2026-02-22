@@ -264,3 +264,29 @@ pub async fn update_tool_filter(
 }
 
 pub const DEFAULT_TOOL_FILTER_SUGGESTIONS: &[&str] = &["WebSearch"];
+
+// -- Message Filters --
+
+pub async fn get_keep_tool_pairs(pool: &SqlitePool, profile_id: &str) -> anyhow::Result<i64> {
+    let row: Option<(i64,)> =
+        sqlx::query_as("SELECT keep_tool_pairs FROM message_filters WHERE profile_id = ?")
+            .bind(profile_id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(row.map(|r| r.0).unwrap_or(0))
+}
+
+pub async fn set_message_filter(
+    pool: &SqlitePool,
+    profile_id: &str,
+    keep_tool_pairs: i64,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        "INSERT INTO message_filters (profile_id, keep_tool_pairs) VALUES (?, ?) ON CONFLICT(profile_id) DO UPDATE SET keep_tool_pairs = excluded.keep_tool_pairs",
+    )
+    .bind(profile_id)
+    .bind(keep_tool_pairs)
+    .execute(pool)
+    .await?;
+    Ok(())
+}

@@ -2450,6 +2450,7 @@ dependencies = [
  "db",
  "futures",
  "log",
+ "regex",
  "reqwest",
  "serde_json",
  "sqlx",
