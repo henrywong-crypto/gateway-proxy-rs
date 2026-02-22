@@ -128,7 +128,9 @@ fn translate_bedrock_request(
     auth_header: Option<&str>,
     x_api_key: Option<&str>,
 ) -> Result<(Vec<u8>, reqwest::header::HeaderMap), actix_web::Error> {
-    let obj = data.as_object_mut().unwrap();
+    let obj = data
+        .as_object_mut()
+        .ok_or_else(|| ErrorBadRequest("Request body must be a JSON object"))?;
 
     // Extract anthropic_version and anthropic_beta from body
     let anthropic_version = obj

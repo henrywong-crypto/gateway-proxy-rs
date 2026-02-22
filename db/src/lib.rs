@@ -17,12 +17,7 @@ pub async fn init_pool(db_path: &str) -> anyhow::Result<SqlitePool> {
         .connect_with(opts)
         .await?;
 
-    for stmt in include_str!("../../migrations/init.sql").split(';') {
-        let stmt = stmt.trim();
-        if !stmt.is_empty() {
-            sqlx::query(stmt).execute(&pool).await?;
-        }
-    }
+    sqlx::migrate!("../migrations").run(&pool).await?;
 
     ensure_default_profile(&pool).await?;
 

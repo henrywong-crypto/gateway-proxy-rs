@@ -40,7 +40,9 @@ fn apply_system_filters(body: &mut Value, filters: &[String]) {
 
     if let Some(s) = system.as_str().map(|s| s.to_string()) {
         if filters.iter().any(|f| pattern_matches(&s, f)) {
-            body.as_object_mut().unwrap().remove("system");
+            if let Some(obj) = body.as_object_mut() {
+                obj.remove("system");
+            }
         }
         return;
     }
@@ -51,7 +53,9 @@ fn apply_system_filters(body: &mut Value, filters: &[String]) {
             !filters.iter().any(|f| pattern_matches(text, f))
         });
         if arr.is_empty() {
-            body.as_object_mut().unwrap().remove("system");
+            if let Some(obj) = body.as_object_mut() {
+                obj.remove("system");
+            }
         }
     }
 }
@@ -72,7 +76,9 @@ fn apply_tool_filters(body: &mut Value, filters: &[String]) {
             !filters.iter().any(|f| f == name)
         });
         if arr.is_empty() {
-            body.as_object_mut().unwrap().remove("tools");
+            if let Some(obj) = body.as_object_mut() {
+                obj.remove("tools");
+            }
         }
     }
 }

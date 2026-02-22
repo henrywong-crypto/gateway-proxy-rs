@@ -242,22 +242,18 @@ pub async fn add_tool_filter(
     Ok(())
 }
 
-pub async fn delete_tool_filter(pool: &SqlitePool, id: uuid::Uuid) -> anyhow::Result<()> {
+pub async fn delete_tool_filter(pool: &SqlitePool, id: &str) -> anyhow::Result<()> {
     sqlx::query("DELETE FROM tool_filters WHERE id = ?")
-        .bind(id.to_string())
+        .bind(id)
         .execute(pool)
         .await?;
     Ok(())
 }
 
-pub async fn update_tool_filter(
-    pool: &SqlitePool,
-    id: uuid::Uuid,
-    name: &str,
-) -> anyhow::Result<()> {
+pub async fn update_tool_filter(pool: &SqlitePool, id: &str, name: &str) -> anyhow::Result<()> {
     sqlx::query("UPDATE tool_filters SET name = ? WHERE id = ?")
         .bind(name)
-        .bind(id.to_string())
+        .bind(id)
         .execute(pool)
         .await?;
     Ok(())
