@@ -11,7 +11,7 @@ pub async fn count_sessions(pool: &SqlitePool) -> anyhow::Result<i64> {
 
 pub async fn list_sessions(pool: &SqlitePool) -> anyhow::Result<Vec<Session>> {
     Ok(sqlx::query_as::<_, Session>(
-        "SELECT s.id, s.name, s.target_url, s.tls_verify_disabled, s.auth_header, s.x_api_key, s.profile_id, s.created_at, \
+        "SELECT s.id, s.name, s.target_url, s.tls_verify_disabled, s.auth_header, s.x_api_key, s.profile_id, s.error_inject, s.created_at, \
          COALESCE((SELECT COUNT(*) FROM requests r WHERE r.session_id = s.id), 0) as request_count \
          FROM sessions s ORDER BY s.created_at DESC",
     )
@@ -21,7 +21,7 @@ pub async fn list_sessions(pool: &SqlitePool) -> anyhow::Result<Vec<Session>> {
 
 pub async fn get_session(pool: &SqlitePool, id: &str) -> anyhow::Result<Option<Session>> {
     Ok(sqlx::query_as::<_, Session>(
-        "SELECT s.id, s.name, s.target_url, s.tls_verify_disabled, s.auth_header, s.x_api_key, s.profile_id, s.created_at, \
+        "SELECT s.id, s.name, s.target_url, s.tls_verify_disabled, s.auth_header, s.x_api_key, s.profile_id, s.error_inject, s.created_at, \
          COALESCE((SELECT COUNT(*) FROM requests r WHERE r.session_id = s.id), 0) as request_count \
          FROM sessions s WHERE s.id = ?",
     )
@@ -53,6 +53,19 @@ pub async fn create_session(pool: &SqlitePool, params: &SessionParams<'_>) -> an
     .bind(params.profile_id)
     .execute(pool)
     .await?;
+    Ok(())
+}
+
+pub async fn set_error_inject(
+    pool: &SqlitePool,
+    session_id: &str,
+    error_inject: Option<&str>,
+) -> anyhow::Result<()> {
+    sqlx::query("UPDATE sessions SET error_inject = ? WHERE id = ?")
+        .bind(error_inject)
+        .bind(session_id)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 

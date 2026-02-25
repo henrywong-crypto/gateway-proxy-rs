@@ -1,4 +1,5 @@
 pub mod detail;
+pub mod error_inject;
 pub mod filters;
 pub mod home;
 pub mod requests;

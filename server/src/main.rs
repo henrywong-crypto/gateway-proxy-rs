@@ -173,6 +173,18 @@ async fn main() -> anyhow::Result<()> {
                 web::post().to(handlers::delete_session),
             )
             .route(
+                "/_dashboard/sessions/{id}/error-inject",
+                web::get().to(handlers::error_inject_show),
+            )
+            .route(
+                "/_dashboard/sessions/{id}/error-inject",
+                web::post().to(handlers::error_inject_set),
+            )
+            .route(
+                "/_dashboard/sessions/{id}/error-inject/clear",
+                web::post().to(handlers::error_inject_clear),
+            )
+            .route(
                 "/_proxy/{session_id}/{tail:.*}",
                 web::to(handlers::proxy_catch_all),
             )

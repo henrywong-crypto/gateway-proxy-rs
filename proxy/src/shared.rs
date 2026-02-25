@@ -1,6 +1,6 @@
 use actix_web::error::{ErrorBadGateway, ErrorInternalServerError, ErrorNotFound};
 use actix_web::http::StatusCode;
-use actix_web::{HttpRequest, HttpResponseBuilder};
+use actix_web::{HttpRequest, HttpResponse, HttpResponseBuilder};
 use common::truncate::truncate_strings;
 use serde_json::Value;
 use sqlx::SqlitePool;
@@ -187,6 +187,29 @@ pub async fn store_response(
     )
     .await?;
     Ok(())
+}
+
+/// Return the SSE data JSON for a known error type key, or `None` if unknown.
+pub fn error_inject_data_json(error_type: &str) -> Option<&'static str> {
+    common::error_inject::data_json_for_key(error_type)
+}
+
+/// Return the HTTP status code for a known error type key, or `None` if unknown.
+pub fn error_inject_status(error_type: &str) -> Option<u16> {
+    common::error_inject::status_for_key(error_type)
+}
+
+/// Build an error injection response with the correct HTTP status code and JSON body.
+/// Returns `Some(HttpResponse)` if the key is a known error type, `None` otherwise.
+pub fn build_injected_sse_error(error_type: &str) -> Option<HttpResponse> {
+    let data_json = error_inject_data_json(error_type)?;
+    let status = error_inject_status(error_type)?;
+    let actix_status = StatusCode::from_u16(status).ok()?;
+    Some(
+        HttpResponse::build(actix_status)
+            .insert_header((actix_web::http::header::CONTENT_TYPE, "application/json"))
+            .body(data_json),
+    )
 }
 
 /// Convert a u16 status code to an actix StatusCode.

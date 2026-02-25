@@ -8,10 +8,10 @@ use actix_web::{web, HttpRequest, HttpResponse};
 use sqlx::SqlitePool;
 
 use shared::{
-    actix_headers_iter, build_forward_headers, build_stored_path, build_target_url,
-    effective_client, forward_response_headers, get_session_or_error, headers_to_json,
-    load_filters_for_profile, log_request, parse_body_fields, store_response, to_actix_status,
-    RequestMeta,
+    actix_headers_iter, build_forward_headers, build_injected_sse_error, build_stored_path,
+    build_target_url, effective_client, forward_response_headers, get_session_or_error,
+    headers_to_json, load_filters_for_profile, log_request, parse_body_fields, store_response,
+    to_actix_status, RequestMeta,
 };
 
 pub async fn proxy_handler(
@@ -27,6 +27,15 @@ pub async fn proxy_handler(
         .ok_or_else(|| ErrorBadRequest("Missing session_id"))?;
 
     let session = get_session_or_error(pool.get_ref(), session_id).await?;
+
+    // Return injected SSE error if error injection is active for this session.
+    if let Some(ref error_type) = session.error_inject {
+        if !error_type.is_empty() {
+            if let Some(resp) = build_injected_sse_error(error_type) {
+                return Ok(resp);
+            }
+        }
+    }
 
     let query = req.uri().query();
     let target_url = build_target_url(&session.target_url, full_path, query);

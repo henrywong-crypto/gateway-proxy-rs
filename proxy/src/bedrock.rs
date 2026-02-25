@@ -6,8 +6,9 @@ use futures::StreamExt;
 use sqlx::SqlitePool;
 
 use crate::shared::{
-    actix_headers_iter, effective_client, extract_request_fields, get_session_or_error,
-    headers_to_json, load_filters_for_profile, log_request, to_actix_status, RequestMeta,
+    actix_headers_iter, effective_client, error_inject_data_json, error_inject_status,
+    extract_request_fields, get_session_or_error, headers_to_json, load_filters_for_profile,
+    log_request, to_actix_status, RequestMeta,
 };
 use crate::sse::parse_sse_events;
 
@@ -222,6 +223,21 @@ pub async fn bedrock_streaming_handler(
         .ok_or_else(|| ErrorBadRequest("Missing model_id"))?;
 
     let session = get_session_or_error(pool.get_ref(), session_id).await?;
+
+    // Return injected error if error injection is active for this session.
+    // Return the error JSON with the correct HTTP status code so clients recognize it.
+    if let Some(ref error_type) = session.error_inject {
+        if !error_type.is_empty() {
+            if let Some(data_json) = error_inject_data_json(error_type) {
+                let status = error_inject_status(error_type).unwrap_or(500);
+                let actix_status = actix_web::http::StatusCode::from_u16(status)
+                    .unwrap_or(actix_web::http::StatusCode::INTERNAL_SERVER_ERROR);
+                return Ok(HttpResponse::build(actix_status)
+                    .insert_header((actix_web::http::header::CONTENT_TYPE, "application/json"))
+                    .body(data_json));
+            }
+        }
+    }
 
     // Parse and log the original request
     let original_data: serde_json::Value = serde_json::from_slice(&body)

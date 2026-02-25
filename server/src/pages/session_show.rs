@@ -50,11 +50,22 @@ pub fn render_session_show(session: &Session, port: u16, profile_name: Option<&s
         ],
         info_rows,
         content: (),
-        subpages: vec![Subpage::new(
-            "Requests",
-            format!("/_dashboard/sessions/{}/requests", session.id),
-            session.request_count,
-        )],
+        subpages: vec![
+            Subpage::new(
+                "Requests",
+                format!("/_dashboard/sessions/{}/requests", session.id),
+                session.request_count,
+            ),
+            Subpage::new(
+                "Error Injection",
+                format!("/_dashboard/sessions/{}/error-inject", session.id),
+                if session.error_inject.as_deref().unwrap_or("").is_empty() {
+                    "off"
+                } else {
+                    "on"
+                },
+            ),
+        ],
     }
     .render()
 }

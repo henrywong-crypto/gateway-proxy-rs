@@ -10,6 +10,7 @@ pub struct Session {
     pub auth_header: Option<String>,
     pub x_api_key: Option<String>,
     pub profile_id: Option<String>,
+    pub error_inject: Option<String>,
     pub created_at: Option<String>,
     #[sqlx(default)]
     pub request_count: i64,
