@@ -1,16 +1,20 @@
-use actix_web::error::{ErrorBadGateway, ErrorBadRequest, ErrorInternalServerError};
-use actix_web::{web, HttpRequest, HttpResponse};
+use actix_web::{
+    error::{ErrorBadGateway, ErrorBadRequest, ErrorInternalServerError},
+    web, HttpRequest, HttpResponse,
+};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use bytes::Bytes;
 use futures::StreamExt;
 use sqlx::SqlitePool;
 
-use crate::shared::{
-    actix_headers_iter, effective_client, error_inject_data_json, error_inject_status,
-    extract_request_fields, get_session_or_error, headers_to_json, load_filters_for_profile,
-    log_request, to_actix_status, RequestMeta,
+use crate::{
+    shared::{
+        actix_headers_iter, effective_client, error_inject_data_json, error_inject_status,
+        extract_request_fields, get_session_or_error, headers_to_json, load_filters_for_profile,
+        log_request, to_actix_status, RequestMeta,
+    },
+    sse::parse_sse_events,
 };
-use crate::sse::parse_sse_events;
 
 // --- AWS Event Stream binary protocol encoding ---
 

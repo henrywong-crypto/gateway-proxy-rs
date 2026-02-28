@@ -1,5 +1,6 @@
-use crate::pages::{collapsible_block, html_escape};
 use ::common::models::ProxyRequest;
+
+use crate::pages::{collapsible_block, html_escape};
 
 pub fn render_kv_table(json_str: &str) -> String {
     let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) else {

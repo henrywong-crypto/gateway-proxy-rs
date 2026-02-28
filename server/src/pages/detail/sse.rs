@@ -1,5 +1,7 @@
-use crate::pages::{collapsible_block, html_escape};
 use ::common::models::ProxyRequest;
+use std::collections::HashMap;
+
+use crate::pages::{collapsible_block, html_escape};
 
 pub fn render_response_sse(req: &ProxyRequest) -> String {
     let mut html = String::new();
@@ -11,14 +13,10 @@ pub fn render_response_sse(req: &ProxyRequest) -> String {
             html.push_str("<table><tr><th>#</th><th>Event</th><th>Data</th><th>Raw</th></tr>");
 
             // Track accumulated text/json per content block index
-            let mut block_text: std::collections::HashMap<i64, String> =
-                std::collections::HashMap::new();
-            let mut block_json: std::collections::HashMap<i64, String> =
-                std::collections::HashMap::new();
-            let mut block_names: std::collections::HashMap<i64, String> =
-                std::collections::HashMap::new();
-            let mut block_types: std::collections::HashMap<i64, String> =
-                std::collections::HashMap::new();
+            let mut block_text: HashMap<i64, String> = HashMap::new();
+            let mut block_json: HashMap<i64, String> = HashMap::new();
+            let mut block_names: HashMap<i64, String> = HashMap::new();
+            let mut block_types: HashMap<i64, String> = HashMap::new();
 
             for (i, event) in events.iter().enumerate() {
                 let event_type = event.get("event").and_then(|e| e.as_str()).unwrap_or("");

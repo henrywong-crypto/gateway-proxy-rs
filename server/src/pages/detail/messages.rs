@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::pages::{collapsible_block, html_escape};
 
 pub fn render_messages(json_str: &str, order: &str, keep_tool_pairs: i64) -> String {
@@ -6,7 +8,7 @@ pub fn render_messages(json_str: &str, order: &str, keep_tool_pairs: i64) -> Str
     };
 
     // Collect tool_use IDs to determine which are filtered
-    let filtered_ids: std::collections::HashSet<String> = if keep_tool_pairs > 0 {
+    let filtered_ids: HashSet<String> = if keep_tool_pairs > 0 {
         let mut all_ids: Vec<String> = Vec::new();
         for msg in &msgs {
             if let Some(blocks) = msg.get("content").and_then(|c| c.as_array()) {
@@ -23,10 +25,10 @@ pub fn render_messages(json_str: &str, order: &str, keep_tool_pairs: i64) -> Str
         if all_ids.len() > keep {
             all_ids[..all_ids.len() - keep].iter().cloned().collect()
         } else {
-            std::collections::HashSet::new()
+            HashSet::new()
         }
     } else {
-        std::collections::HashSet::new()
+        HashSet::new()
     };
 
     if order == "desc" {

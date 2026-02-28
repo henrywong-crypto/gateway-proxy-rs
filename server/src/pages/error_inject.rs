@@ -1,9 +1,6 @@
-use leptos::either::Either;
-use leptos::prelude::*;
+use common::{error_inject::ERROR_TYPES, models::Session};
+use leptos::{either::Either, prelude::*};
 use templates::{html_escape, Breadcrumb, NavLink, Page};
-
-use common::error_inject::ERROR_TYPES;
-use common::models::Session;
 
 pub fn render_error_inject(session: &Session) -> String {
     let session_id = session.id.to_string();

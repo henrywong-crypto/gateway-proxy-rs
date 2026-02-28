@@ -1,5 +1,6 @@
 use actix_web::{web, HttpResponse};
 use sqlx::SqlitePool;
+use std::collections::HashMap;
 
 use crate::pages;
 
@@ -72,7 +73,7 @@ pub async fn websearch_followup_hub(
 pub async fn websearch_followup_page(
     pool: web::Data<SqlitePool>,
     path: web::Path<(String, String, String)>,
-    query: web::Query<std::collections::HashMap<String, String>>,
+    query: web::Query<HashMap<String, String>>,
 ) -> HttpResponse {
     let (session_id, req_id, page) = path.into_inner();
 

@@ -5,17 +5,20 @@ mod system;
 mod tools;
 mod websearch;
 
-use leptos::prelude::*;
-
-use self::common::{render_kv_table, render_response_headers};
-use self::messages::render_messages;
-use self::sse::render_response_sse;
-use self::system::render_system;
-use self::tools::render_tools;
 pub use self::websearch::*;
-use crate::pages::html_escape;
+use self::{
+    common::{render_kv_table, render_response_headers},
+    messages::render_messages,
+    sse::render_response_sse,
+    system::render_system,
+    tools::render_tools,
+};
 use ::common::models::{ProxyRequest, Session};
+use leptos::prelude::*;
+use std::collections::HashMap;
 use templates::{Breadcrumb, InfoRow, NavLink, Page, Subpage};
+
+use crate::pages::html_escape;
 
 fn detail_breadcrumbs(
     session: &Session,
@@ -163,7 +166,7 @@ pub fn render_detail_page(
     req: &ProxyRequest,
     session: &Session,
     page: &str,
-    query: &std::collections::HashMap<String, String>,
+    query: &HashMap<String, String>,
     filters: &[String],
     keep_tool_pairs: i64,
 ) -> String {

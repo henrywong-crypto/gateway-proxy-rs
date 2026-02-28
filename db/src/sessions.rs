@@ -1,6 +1,5 @@
-use sqlx::sqlite::SqlitePool;
-
 use common::models::Session;
+use sqlx::sqlite::SqlitePool;
 
 pub async fn count_sessions(pool: &SqlitePool) -> anyhow::Result<i64> {
     let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sessions")

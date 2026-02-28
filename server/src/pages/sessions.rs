@@ -1,7 +1,5 @@
-use leptos::either::Either;
-use leptos::prelude::*;
-
 use common::models::{FilterProfile, Session};
+use leptos::{either::Either, prelude::*};
 use templates::{Breadcrumb, InfoRow, NavLink, Page, Subpage};
 
 pub fn render_sessions_index(sessions: &[Session]) -> String {

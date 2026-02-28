@@ -1,7 +1,5 @@
-use leptos::either::Either;
-use leptos::prelude::*;
-
 use common::models::{FilterProfile, SystemFilter, ToolFilter};
+use leptos::{either::Either, prelude::*};
 use templates::{Breadcrumb, InfoRow, NavLink, Page, Subpage};
 
 pub fn render_filters_index(profiles: &[FilterProfile]) -> String {

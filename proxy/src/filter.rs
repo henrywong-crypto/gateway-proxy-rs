@@ -1,5 +1,6 @@
 use regex::Regex;
 use serde_json::Value;
+use std::collections::HashSet;
 
 /// Returns true if text matches the pattern (tried as regex first, then substring).
 fn pattern_matches(text: &str, pattern: &str) -> bool {
@@ -109,7 +110,7 @@ fn apply_message_filters(body: &mut Value, keep: usize) {
 
     // 2. IDs to remove: all except the last `keep`
     let remove_count = all_tool_ids.len() - keep;
-    let ids_to_remove: std::collections::HashSet<&str> = all_tool_ids[..remove_count]
+    let ids_to_remove: HashSet<&str> = all_tool_ids[..remove_count]
         .iter()
         .map(|s| s.as_str())
         .collect();

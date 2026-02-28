@@ -1,5 +1,6 @@
 use actix_web::{web, HttpResponse};
 use sqlx::SqlitePool;
+use std::collections::HashMap;
 
 use crate::pages;
 
@@ -19,7 +20,7 @@ pub async fn filters_new() -> HttpResponse {
 
 pub async fn filters_create(
     pool: web::Data<SqlitePool>,
-    form: web::Form<std::collections::HashMap<String, String>>,
+    form: web::Form<HashMap<String, String>>,
 ) -> HttpResponse {
     let name = match form.get("name") {
         Some(n) if !n.is_empty() => n.clone(),
@@ -74,7 +75,7 @@ pub async fn filter_profile_edit(
 pub async fn filter_profile_update(
     pool: web::Data<SqlitePool>,
     path: web::Path<String>,
-    form: web::Form<std::collections::HashMap<String, String>>,
+    form: web::Form<HashMap<String, String>>,
 ) -> HttpResponse {
     let profile_id = path.into_inner();
     let name = match form.get("name") {
@@ -148,7 +149,7 @@ pub async fn filter_profile_system_new(
 pub async fn filter_profile_system_post(
     pool: web::Data<SqlitePool>,
     path: web::Path<String>,
-    form: web::Form<std::collections::HashMap<String, String>>,
+    form: web::Form<HashMap<String, String>>,
 ) -> HttpResponse {
     let profile_id = path.into_inner();
 
@@ -188,7 +189,7 @@ pub async fn system_filter_edit(
 pub async fn system_filter_edit_post(
     pool: web::Data<SqlitePool>,
     path: web::Path<(String, String)>,
-    form: web::Form<std::collections::HashMap<String, String>>,
+    form: web::Form<HashMap<String, String>>,
 ) -> HttpResponse {
     let (profile_id, filter_id) = path.into_inner();
 
@@ -257,7 +258,7 @@ pub async fn filter_profile_tools_new(
 pub async fn filter_profile_tools_post(
     pool: web::Data<SqlitePool>,
     path: web::Path<String>,
-    form: web::Form<std::collections::HashMap<String, String>>,
+    form: web::Form<HashMap<String, String>>,
 ) -> HttpResponse {
     let profile_id = path.into_inner();
 
@@ -297,7 +298,7 @@ pub async fn tool_filter_edit(
 pub async fn tool_filter_edit_post(
     pool: web::Data<SqlitePool>,
     path: web::Path<(String, String)>,
-    form: web::Form<std::collections::HashMap<String, String>>,
+    form: web::Form<HashMap<String, String>>,
 ) -> HttpResponse {
     let (profile_id, filter_id) = path.into_inner();
 
@@ -349,7 +350,7 @@ pub async fn filter_profile_messages(
 pub async fn filter_profile_messages_post(
     pool: web::Data<SqlitePool>,
     path: web::Path<String>,
-    form: web::Form<std::collections::HashMap<String, String>>,
+    form: web::Form<HashMap<String, String>>,
 ) -> HttpResponse {
     let profile_id = path.into_inner();
 

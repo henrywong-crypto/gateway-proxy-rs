@@ -1,9 +1,7 @@
-use leptos::either::Either;
-use leptos::prelude::*;
-use templates::{html_escape, Breadcrumb, NavLink, Page};
-
 use common::models::Session;
+use leptos::{either::Either, prelude::*};
 use proxy::websearch::PendingToolInfo;
+use templates::{html_escape, Breadcrumb, NavLink, Page};
 
 pub fn render_websearch(session: &Session, pending: &[(String, Vec<PendingToolInfo>)]) -> String {
     let session_id = session.id.to_string();

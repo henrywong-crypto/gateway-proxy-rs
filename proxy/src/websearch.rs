@@ -1,7 +1,6 @@
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-
 use serde_json::{json, Value};
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
 
 // ---------------------------------------------------------------------------
@@ -683,8 +682,7 @@ pub async fn maybe_intercept(params: &InterceptParams<'_>) -> Option<InterceptRe
 
             // Remove tool_use content blocks that were filtered out, so the
             // follow-up body stays consistent with the tool_results we provide.
-            let kept_ids: std::collections::HashSet<&str> =
-                tool_uses.iter().map(|t| t.id.as_str()).collect();
+            let kept_ids: HashSet<&str> = tool_uses.iter().map(|t| t.id.as_str()).collect();
             content_blocks.retain(|block| {
                 let block_type = block.get("type").and_then(|v| v.as_str()).unwrap_or("");
                 if block_type != "tool_use" {
@@ -932,7 +930,7 @@ pub async fn maybe_intercept(params: &InterceptParams<'_>) -> Option<InterceptRe
                         if next_uses.is_empty() {
                             break;
                         }
-                        let kept_ids: std::collections::HashSet<&str> =
+                        let kept_ids: HashSet<&str> =
                             next_uses.iter().map(|t| t.id.as_str()).collect();
                         next_blocks.retain(|block| {
                             let block_type =

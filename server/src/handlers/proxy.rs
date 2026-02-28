@@ -1,7 +1,6 @@
 use actix_web::{web, HttpRequest, HttpResponse};
-use sqlx::SqlitePool;
-
 use proxy::websearch::ApprovalQueue;
+use sqlx::SqlitePool;
 
 pub async fn proxy_catch_all(
     req: HttpRequest,

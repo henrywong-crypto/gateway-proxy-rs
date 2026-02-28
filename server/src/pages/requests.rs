@@ -1,7 +1,6 @@
-use leptos::either::Either;
-use leptos::prelude::*;
-
 use common::models::{ProxyRequest, Session};
+use leptos::{either::Either, prelude::*};
+use std::collections::HashMap;
 use templates::{Breadcrumb, NavLink, Page};
 
 pub fn render_requests_index(
@@ -194,9 +193,9 @@ fn get_response_summary(r: &ProxyRequest) -> (String, String) {
         return (String::new(), String::new());
     };
 
-    let mut block_types: std::collections::HashMap<i64, String> = std::collections::HashMap::new();
-    let mut block_names: std::collections::HashMap<i64, String> = std::collections::HashMap::new();
-    let mut block_text: std::collections::HashMap<i64, String> = std::collections::HashMap::new();
+    let mut block_types: HashMap<i64, String> = HashMap::new();
+    let mut block_names: HashMap<i64, String> = HashMap::new();
+    let mut block_text: HashMap<i64, String> = HashMap::new();
 
     for event in &events {
         let event_type = event.get("event").and_then(|e| e.as_str()).unwrap_or("");

@@ -1,13 +1,13 @@
-use leptos::prelude::*;
-
-use super::common::render_kv_table;
-use super::messages::render_messages;
-use super::sse::render_response_sse;
-use super::system::render_system;
-use super::tools::render_tools;
-use crate::pages::html_escape;
+use super::{
+    common::render_kv_table, messages::render_messages, sse::render_response_sse,
+    system::render_system, tools::render_tools,
+};
 use ::common::models::{ProxyRequest, Session};
+use leptos::prelude::*;
+use std::collections::HashMap;
 use templates::{Breadcrumb, InfoRow, NavLink, Page, Subpage};
+
+use crate::pages::html_escape;
 
 /// Build breadcrumbs for WebSearch pages.
 /// `trail` contains `(label, href)` pairs; the last entry with `None` href is the current page.
@@ -235,7 +235,7 @@ pub fn render_websearch_followup_page(
     req: &ProxyRequest,
     session: &Session,
     page: &str,
-    query: &std::collections::HashMap<String, String>,
+    query: &HashMap<String, String>,
     filters: &[String],
     keep_tool_pairs: i64,
 ) -> String {

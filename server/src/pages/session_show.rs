@@ -1,6 +1,5 @@
-use templates::{html_escape, Breadcrumb, InfoRow, NavLink, Page, Subpage};
-
 use common::models::Session;
+use templates::{html_escape, Breadcrumb, InfoRow, NavLink, Page, Subpage};
 
 fn copy_link_html(text: &str) -> String {
     format!(

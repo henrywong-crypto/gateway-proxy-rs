@@ -1,12 +1,13 @@
 use actix_web::{web, HttpResponse};
 use sqlx::SqlitePool;
+use std::collections::HashMap;
 
 use crate::pages;
 
 pub async fn requests_index(
     pool: web::Data<SqlitePool>,
     path: web::Path<String>,
-    query: web::Query<std::collections::HashMap<String, String>>,
+    query: web::Query<HashMap<String, String>>,
 ) -> HttpResponse {
     let session_id = path.into_inner();
     let auto_refresh = query.get("refresh").map(|v| v.as_str()) == Some("on");
@@ -51,7 +52,7 @@ pub async fn request_detail(
 pub async fn request_detail_page(
     pool: web::Data<SqlitePool>,
     path: web::Path<(String, String, String)>,
-    query: web::Query<std::collections::HashMap<String, String>>,
+    query: web::Query<HashMap<String, String>>,
 ) -> HttpResponse {
     let (session_id, req_id, page) = path.into_inner();
 

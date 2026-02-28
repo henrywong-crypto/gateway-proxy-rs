@@ -4,16 +4,17 @@ pub(crate) mod shared;
 pub(crate) mod sse;
 pub mod websearch;
 
-use actix_web::error::{ErrorBadGateway, ErrorBadRequest, ErrorInternalServerError};
-use actix_web::{web, HttpRequest, HttpResponse};
-use sqlx::SqlitePool;
-
+use actix_web::{
+    error::{ErrorBadGateway, ErrorBadRequest, ErrorInternalServerError},
+    web, HttpRequest, HttpResponse,
+};
 use shared::{
     actix_headers_iter, build_forward_headers, build_injected_sse_error, build_stored_path,
     build_target_url, effective_client, forward_response_headers, get_session_or_error,
     headers_to_json, load_filters_for_profile, log_request, parse_body_fields, store_response,
     to_actix_status, RequestMeta,
 };
+use sqlx::SqlitePool;
 
 pub async fn proxy_handler(
     req: HttpRequest,

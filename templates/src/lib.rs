@@ -1,5 +1,4 @@
-use leptos::either::Either;
-use leptos::prelude::*;
+use leptos::{either::Either, prelude::*};
 
 pub fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")

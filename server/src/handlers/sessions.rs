@@ -1,11 +1,10 @@
 use actix_web::{web, HttpResponse};
+use proxy::websearch::{ApprovalDecision, ApprovalQueue};
 use sqlx::SqlitePool;
+use std::collections::HashMap;
 use uuid::Uuid;
 
-use proxy::websearch::{ApprovalDecision, ApprovalQueue};
-
-use crate::pages;
-use crate::Args;
+use crate::{pages, Args};
 
 pub async fn home_page(pool: web::Data<SqlitePool>) -> HttpResponse {
     let session_count = db::count_sessions(pool.get_ref()).await.unwrap_or(0);
@@ -35,7 +34,7 @@ pub async fn new_session(pool: web::Data<SqlitePool>) -> HttpResponse {
 
 pub async fn create_session(
     pool: web::Data<SqlitePool>,
-    form: web::Form<std::collections::HashMap<String, String>>,
+    form: web::Form<HashMap<String, String>>,
 ) -> HttpResponse {
     let (name, target_url) = match (form.get("name"), form.get("target_url")) {
         (Some(n), Some(t)) if !n.is_empty() && !t.is_empty() => (n.clone(), t.clone()),
@@ -138,7 +137,7 @@ pub async fn edit_session(
 pub async fn update_session(
     pool: web::Data<SqlitePool>,
     path: web::Path<String>,
-    form: web::Form<std::collections::HashMap<String, String>>,
+    form: web::Form<HashMap<String, String>>,
 ) -> HttpResponse {
     let session_id = path.into_inner();
     let (name, target_url) = match (form.get("name"), form.get("target_url")) {
@@ -219,7 +218,7 @@ pub async fn error_inject_show(
 pub async fn error_inject_set(
     pool: web::Data<SqlitePool>,
     path: web::Path<String>,
-    form: web::Form<std::collections::HashMap<String, String>>,
+    form: web::Form<HashMap<String, String>>,
 ) -> HttpResponse {
     let session_id = path.into_inner();
     let error_type = form.get("error_type").map(|s| s.as_str()).unwrap_or("");
@@ -375,7 +374,7 @@ pub async fn websearch_accept(
 pub async fn websearch_whitelist_set(
     pool: web::Data<SqlitePool>,
     path: web::Path<String>,
-    form: web::Form<std::collections::HashMap<String, String>>,
+    form: web::Form<HashMap<String, String>>,
 ) -> HttpResponse {
     let session_id = path.into_inner();
     let whitelist = form.get("whitelist").map(|s| s.as_str()).unwrap_or("");
@@ -414,7 +413,7 @@ pub async fn websearch_whitelist_clear(
 pub async fn websearch_tool_names_set(
     pool: web::Data<SqlitePool>,
     path: web::Path<String>,
-    form: web::Form<std::collections::HashMap<String, String>>,
+    form: web::Form<HashMap<String, String>>,
 ) -> HttpResponse {
     let session_id = path.into_inner();
     let tool_names = form
@@ -435,7 +434,7 @@ pub async fn websearch_tool_names_set(
 pub async fn webfetch_tool_names_set(
     pool: web::Data<SqlitePool>,
     path: web::Path<String>,
-    form: web::Form<std::collections::HashMap<String, String>>,
+    form: web::Form<HashMap<String, String>>,
 ) -> HttpResponse {
     let session_id = path.into_inner();
     let tool_names = form

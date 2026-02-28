@@ -1,9 +1,12 @@
-use actix_web::error::{ErrorBadGateway, ErrorInternalServerError, ErrorNotFound};
-use actix_web::http::StatusCode;
-use actix_web::{HttpRequest, HttpResponse, HttpResponseBuilder};
+use actix_web::{
+    error::{ErrorBadGateway, ErrorInternalServerError, ErrorNotFound},
+    http::StatusCode,
+    HttpRequest, HttpResponse, HttpResponseBuilder,
+};
 use common::truncate::truncate_strings;
 use serde_json::Value;
 use sqlx::SqlitePool;
+use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use crate::sse;
@@ -55,7 +58,7 @@ pub async fn get_session_or_error(
 
 /// Serialize an iterator of (name, value) header pairs to a pretty-printed JSON string.
 pub fn headers_to_json(headers: impl Iterator<Item = (String, String)>) -> anyhow::Result<String> {
-    let map: std::collections::HashMap<String, String> = headers.collect();
+    let map: HashMap<String, String> = headers.collect();
     Ok(serde_json::to_string_pretty(&map)?)
 }
 
@@ -391,8 +394,7 @@ mod tests {
             ("x-custom".to_string(), "value".to_string()),
         ];
         let json = headers_to_json(headers.into_iter()).unwrap();
-        let parsed: std::collections::HashMap<String, String> =
-            serde_json::from_str(&json).unwrap();
+        let parsed: HashMap<String, String> = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.get("content-type").unwrap(), "application/json");
         assert_eq!(parsed.get("x-custom").unwrap(), "value");
     }
@@ -400,8 +402,7 @@ mod tests {
     #[test]
     fn headers_to_json_empty() {
         let json = headers_to_json(std::iter::empty()).unwrap();
-        let parsed: std::collections::HashMap<String, String> =
-            serde_json::from_str(&json).unwrap();
+        let parsed: HashMap<String, String> = serde_json::from_str(&json).unwrap();
         assert!(parsed.is_empty());
     }
 }

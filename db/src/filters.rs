@@ -1,6 +1,5 @@
-use sqlx::sqlite::SqlitePool;
-
 use common::models::{FilterProfile, SystemFilter, ToolFilter};
+use sqlx::sqlite::SqlitePool;
 
 // -- Filter Profiles --
 
