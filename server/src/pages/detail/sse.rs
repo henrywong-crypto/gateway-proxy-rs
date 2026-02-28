@@ -142,12 +142,26 @@ pub fn summarize_sse_event(event_type: &str, data: &serde_json::Value) -> String
                 .pointer("/message/id")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            format!(
+            let mut parts = vec![format!(
                 "{} {} {}",
                 html_escape(model),
                 html_escape(role),
                 html_escape(id)
-            )
+            )];
+            for key in &[
+                "input_tokens",
+                "output_tokens",
+                "cache_creation_input_tokens",
+                "cache_read_input_tokens",
+            ] {
+                if let Some(tokens) = data
+                    .pointer(&format!("/message/usage/{}", key))
+                    .and_then(|v| v.as_i64())
+                {
+                    parts.push(format!("{}: {}", key, tokens));
+                }
+            }
+            parts.join(" | ")
         }
         "content_block_start" => {
             let btype = data
@@ -214,15 +228,22 @@ pub fn summarize_sse_event(event_type: &str, data: &serde_json::Value) -> String
                 .pointer("/delta/stop_reason")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let output_tokens = data
-                .pointer("/usage/output_tokens")
-                .and_then(|v| v.as_i64());
             let mut parts = Vec::new();
             if !stop_reason.is_empty() {
                 parts.push(format!("stop: {}", html_escape(stop_reason)));
             }
-            if let Some(tokens) = output_tokens {
-                parts.push(format!("output_tokens: {}", tokens));
+            for key in &[
+                "input_tokens",
+                "output_tokens",
+                "cache_creation_input_tokens",
+                "cache_read_input_tokens",
+            ] {
+                if let Some(tokens) = data
+                    .pointer(&format!("/usage/{}", key))
+                    .and_then(|v| v.as_i64())
+                {
+                    parts.push(format!("{}: {}", key, tokens));
+                }
             }
             parts.join(" | ")
         }

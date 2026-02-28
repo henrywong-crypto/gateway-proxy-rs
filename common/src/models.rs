@@ -11,6 +11,11 @@ pub struct Session {
     pub x_api_key: Option<String>,
     pub profile_id: Option<String>,
     pub error_inject: Option<String>,
+    pub websearch_intercept: bool,
+    pub webfetch_intercept: bool,
+    pub websearch_whitelist: Option<String>,
+    pub websearch_tool_names: String,
+    pub webfetch_tool_names: String,
     pub created_at: Option<String>,
     #[sqlx(default)]
     pub request_count: i64,
@@ -39,6 +44,10 @@ pub struct ProxyRequest {
     pub response_headers_json: Option<String>,
     pub response_body: Option<String>,
     pub response_events_json: Option<String>,
+    pub ws_first_response_body: Option<String>,
+    pub ws_first_response_events_json: Option<String>,
+    pub ws_followup_body_json: Option<String>,
+    pub ws_rounds_json: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]

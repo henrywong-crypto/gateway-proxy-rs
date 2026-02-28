@@ -1,0 +1,1 @@
+ALTER TABLE sessions ADD COLUMN websearch_intercept INTEGER NOT NULL DEFAULT 0;

@@ -3,6 +3,7 @@ mod messages;
 mod sse;
 mod system;
 mod tools;
+mod websearch;
 
 use leptos::prelude::*;
 
@@ -11,6 +12,7 @@ use self::messages::render_messages;
 use self::sse::render_response_sse;
 use self::system::render_system;
 use self::tools::render_tools;
+pub use self::websearch::*;
 use crate::pages::html_escape;
 use ::common::models::{ProxyRequest, Session};
 use templates::{Breadcrumb, InfoRow, NavLink, Page, Subpage};
@@ -123,6 +125,12 @@ pub fn render_detail_overview(req: &ProxyRequest, session: &Session) -> String {
             json_object_len(req.response_headers_json.as_deref())
                 .map(|n| n.to_string())
                 .unwrap_or_default(),
+        ),
+        (
+            "websearch",
+            "WebSearch",
+            req.ws_first_response_events_json.is_some() || req.ws_followup_body_json.is_some(),
+            String::new(),
         ),
     ];
 

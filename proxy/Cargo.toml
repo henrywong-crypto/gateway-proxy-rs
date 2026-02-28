@@ -18,3 +18,7 @@ log = "0.4"
 regex = "1"
 base64 = "0.22"
 crc32fast = "1"
+tokio = { version = "1", features = ["sync", "time", "macros", "rt"] }
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+html2text = "0.14"

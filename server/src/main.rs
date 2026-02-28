@@ -34,6 +34,7 @@ async fn main() -> anyhow::Result<()> {
     let args_data = web::Data::new(args);
     let pool_data = web::Data::new(pool);
     let client_data = web::Data::new(client);
+    let approval_queue_data = web::Data::new(proxy::websearch::new_approval_queue());
 
     HttpServer::new(move || {
         let payload_cfg = web::PayloadConfig::new(100 * 1024 * 1024); // 100 MB
@@ -43,6 +44,7 @@ async fn main() -> anyhow::Result<()> {
             .app_data(pool_data.clone())
             .app_data(client_data.clone())
             .app_data(args_data.clone())
+            .app_data(approval_queue_data.clone())
             .route("/_dashboard", web::get().to(handlers::home_page))
             .route(
                 "/_dashboard/sessions",
@@ -161,6 +163,26 @@ async fn main() -> anyhow::Result<()> {
                 web::get().to(handlers::request_detail),
             )
             .route(
+                "/_dashboard/sessions/{id}/requests/{req_id}/websearch",
+                web::get().to(handlers::websearch_detail_hub),
+            )
+            .route(
+                "/_dashboard/sessions/{id}/requests/{req_id}/websearch/first_response",
+                web::get().to(handlers::websearch_first_response),
+            )
+            .route(
+                "/_dashboard/sessions/{id}/requests/{req_id}/websearch/followup",
+                web::get().to(handlers::websearch_followup_hub),
+            )
+            .route(
+                "/_dashboard/sessions/{id}/requests/{req_id}/websearch/followup/{page}",
+                web::get().to(handlers::websearch_followup_page),
+            )
+            .route(
+                "/_dashboard/sessions/{id}/requests/{req_id}/websearch/rounds/{round_idx}",
+                web::get().to(handlers::websearch_round),
+            )
+            .route(
                 "/_dashboard/sessions/{id}/requests/{req_id}/{page}",
                 web::get().to(handlers::request_detail_page),
             )
@@ -183,6 +205,54 @@ async fn main() -> anyhow::Result<()> {
             .route(
                 "/_dashboard/sessions/{id}/error-inject/clear",
                 web::post().to(handlers::error_inject_clear),
+            )
+            .route(
+                "/_dashboard/sessions/{id}/websearch",
+                web::get().to(handlers::websearch_show),
+            )
+            .route(
+                "/_dashboard/sessions/{id}/websearch",
+                web::post().to(handlers::websearch_set),
+            )
+            .route(
+                "/_dashboard/sessions/{id}/websearch/clear",
+                web::post().to(handlers::websearch_clear),
+            )
+            .route(
+                "/_dashboard/sessions/{id}/websearch/webfetch",
+                web::post().to(handlers::webfetch_set),
+            )
+            .route(
+                "/_dashboard/sessions/{id}/websearch/webfetch/clear",
+                web::post().to(handlers::webfetch_clear),
+            )
+            .route(
+                "/_dashboard/sessions/{id}/websearch/fail/{approval_id}",
+                web::post().to(handlers::websearch_fail),
+            )
+            .route(
+                "/_dashboard/sessions/{id}/websearch/mock/{approval_id}",
+                web::post().to(handlers::websearch_mock),
+            )
+            .route(
+                "/_dashboard/sessions/{id}/websearch/accept/{approval_id}",
+                web::post().to(handlers::websearch_accept),
+            )
+            .route(
+                "/_dashboard/sessions/{id}/websearch/whitelist",
+                web::post().to(handlers::websearch_whitelist_set),
+            )
+            .route(
+                "/_dashboard/sessions/{id}/websearch/whitelist/clear",
+                web::post().to(handlers::websearch_whitelist_clear),
+            )
+            .route(
+                "/_dashboard/sessions/{id}/websearch/tool-names",
+                web::post().to(handlers::websearch_tool_names_set),
+            )
+            .route(
+                "/_dashboard/sessions/{id}/websearch/webfetch/tool-names",
+                web::post().to(handlers::webfetch_tool_names_set),
             )
             .route(
                 "/_proxy/{session_id}/{tail:.*}",

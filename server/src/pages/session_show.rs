@@ -65,6 +65,23 @@ pub fn render_session_show(session: &Session, port: u16, profile_name: Option<&s
                     "on"
                 },
             ),
+            Subpage::new(
+                "WebSearch Intercept",
+                format!("/_dashboard/sessions/{}/websearch", session.id),
+                format!(
+                    "search: {}, fetch: {}",
+                    if session.websearch_intercept {
+                        "on"
+                    } else {
+                        "off"
+                    },
+                    if session.webfetch_intercept {
+                        "on"
+                    } else {
+                        "off"
+                    },
+                ),
+            ),
         ],
     }
     .render()

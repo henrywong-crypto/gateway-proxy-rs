@@ -26,7 +26,8 @@ pub async fn list_requests(
         "SELECT id, session_id, method, path, timestamp, headers_json, body_json, \
          truncated_json, model, tools_json, messages_json, system_json, params_json, \
          note, created_at, response_status, response_headers_json, response_body, \
-         response_events_json FROM requests WHERE session_id = ? ORDER BY created_at DESC",
+         response_events_json, ws_first_response_body, ws_first_response_events_json, \
+         ws_followup_body_json, ws_rounds_json FROM requests WHERE session_id = ? ORDER BY created_at DESC",
     )
     .bind(session_id)
     .fetch_all(pool)
@@ -38,7 +39,8 @@ pub async fn get_request(pool: &SqlitePool, req_id: &str) -> anyhow::Result<Opti
         "SELECT id, session_id, method, path, timestamp, headers_json, body_json, \
          truncated_json, model, tools_json, messages_json, system_json, params_json, \
          note, created_at, response_status, response_headers_json, response_body, \
-         response_events_json FROM requests WHERE id = ?",
+         response_events_json, ws_first_response_body, ws_first_response_events_json, \
+         ws_followup_body_json, ws_rounds_json FROM requests WHERE id = ?",
     )
     .bind(req_id)
     .fetch_all(pool)
@@ -102,5 +104,40 @@ pub async fn clear_requests(pool: &SqlitePool, session_id: &str) -> anyhow::Resu
         .bind(session_id)
         .execute(pool)
         .await?;
+    Ok(())
+}
+
+pub async fn update_request_note(
+    pool: &SqlitePool,
+    request_id: &str,
+    note: &str,
+) -> anyhow::Result<()> {
+    sqlx::query("UPDATE requests SET note = ? WHERE id = ?")
+        .bind(note)
+        .bind(request_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn update_websearch_data(
+    pool: &SqlitePool,
+    request_id: &str,
+    ws_first_response_body: Option<&str>,
+    ws_first_response_events_json: Option<&str>,
+    ws_followup_body_json: Option<&str>,
+    ws_rounds_json: Option<&str>,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        "UPDATE requests SET ws_first_response_body = ?, ws_first_response_events_json = ?, \
+         ws_followup_body_json = ?, ws_rounds_json = ? WHERE id = ?",
+    )
+    .bind(ws_first_response_body)
+    .bind(ws_first_response_events_json)
+    .bind(ws_followup_body_json)
+    .bind(ws_rounds_json)
+    .bind(request_id)
+    .execute(pool)
+    .await?;
     Ok(())
 }
