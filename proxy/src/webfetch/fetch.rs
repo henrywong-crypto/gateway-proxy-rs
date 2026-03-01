@@ -2,6 +2,10 @@ use serde_json::Value;
 
 use super::extract::ToolUse;
 use super::mock::render_template;
+use crate::shared::{
+    extract_request_fields, headers_to_json, log_request, store_response, RequestMeta,
+};
+use crate::sse::{extract_text_from_events, parse_sse_events};
 
 /// Maximum size (in bytes) of fetched content to include in a tool_result.
 const MAX_ACCEPT_CONTENT_BYTES: usize = 100 * 1024;
@@ -93,7 +97,7 @@ pub(super) async fn build_accept_result(
     let original_host = original_url.host_str().unwrap_or("").to_string();
 
     // Fetch with Accept header preferring markdown/html
-    let resp = match ctx
+    let fetch_response = match ctx
         .client
         .get(url_str)
         .header("Accept", "text/markdown, text/html, */*")
@@ -114,11 +118,15 @@ pub(super) async fn build_accept_result(
         }
     };
 
-    let status = resp.status();
+    let status = fetch_response.status();
 
     // Handle redirects (client has redirect::Policy::none())
     if status.is_redirection() {
-        if let Some(location) = resp.headers().get("location").and_then(|v| v.to_str().ok()) {
+        if let Some(location) = fetch_response
+            .headers()
+            .get("location")
+            .and_then(|v| v.to_str().ok())
+        {
             // Resolve relative redirects against the original URL
             let redirect_url = match original_url.join(location) {
                 Ok(u) => u,
@@ -158,7 +166,7 @@ pub(super) async fn build_accept_result(
             }
 
             // Same-host redirect: follow it manually
-            let follow_resp = match ctx
+            let follow_response = match ctx
                 .client
                 .get(redirect_url.as_str())
                 .header("Accept", "text/markdown, text/html, */*")
@@ -179,19 +187,19 @@ pub(super) async fn build_accept_result(
                 }
             };
 
-            if !follow_resp.status().is_success() {
+            if !follow_response.status().is_success() {
                 return AcceptResult {
                     tool_result: serde_json::json!({
                         "type": "tool_result",
                         "tool_use_id": tool_use.id,
                         "is_error": true,
-                        "content": format!("HTTP error {} when fetching '{}'", follow_resp.status().as_u16(), redirect_url),
+                        "content": format!("HTTP error {} when fetching '{}'", follow_response.status().as_u16(), redirect_url),
                     }),
                     agent_request_id: None,
                 };
             }
 
-            return match follow_resp.bytes().await {
+            return match follow_response.bytes().await {
                 Ok(bytes) => {
                     parse_bytes_to_accept_result(
                         &tool_use.id,
@@ -238,7 +246,7 @@ pub(super) async fn build_accept_result(
         };
     }
 
-    match resp.bytes().await {
+    match fetch_response.bytes().await {
         Ok(bytes) => {
             parse_bytes_to_accept_result(&tool_use.id, &bytes, user_prompt, &original_host, ctx)
                 .await
@@ -287,6 +295,165 @@ fn render_accept_content(bytes: &[u8], accept_prompt: &str, user_prompt: &str) -
     )
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_accept_content_basic_html() {
+        let html = b"<html><body><h1>Hello World</h1><p>Some content</p></body></html>";
+        let result = render_accept_content(html, "Content: {{content}}", "summarize this");
+        assert!(result.contains("Hello World"));
+        assert!(result.contains("Some content"));
+        assert!(result.starts_with("Content: "));
+    }
+
+    #[test]
+    fn render_accept_content_plain_text() {
+        let text = b"Just plain text content";
+        let result = render_accept_content(text, "{{content}}", "");
+        assert!(result.contains("Just plain text content"));
+    }
+
+    #[test]
+    fn render_accept_content_includes_prompt() {
+        let html = b"<p>Page</p>";
+        let result =
+            render_accept_content(html, "Content: {{content}} Prompt: {{prompt}}", "my prompt");
+        assert!(result.contains("my prompt"));
+    }
+
+    #[test]
+    fn render_accept_content_truncation() {
+        // Create content larger than 100KB
+        let large_html = vec![b'a'; 200 * 1024];
+        let result = render_accept_content(&large_html, "{{content}}", "");
+        assert!(result.contains("[Content truncated at 100KB]"));
+        // The output should be bounded in size (template wrapping + truncated content)
+        assert!(result.len() < 150 * 1024);
+    }
+
+    #[test]
+    fn render_accept_content_empty_template() {
+        let html = b"<p>test</p>";
+        let result = render_accept_content(html, "", "");
+        // Empty template renders to empty string
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn render_accept_content_no_template_vars() {
+        let html = b"<p>test</p>";
+        let result = render_accept_content(html, "static prompt", "");
+        assert_eq!(result, "static prompt");
+    }
+}
+
+/// Log an agent request to the database. Returns the request ID on success.
+async fn log_agent_request(
+    ctx: &FetchContext<'_>,
+    agent_body: &Value,
+    url_host: &str,
+) -> Result<String, ()> {
+    let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
+    let note = format!("webfetch agent ({})", url_host);
+    let fields = extract_request_fields(agent_body, None).unwrap_or_default();
+    let headers_json = headers_to_json(
+        ctx.forward_headers
+            .iter()
+            .filter_map(|(k, v)| v.to_str().ok().map(|s| (k.to_string(), s.to_string()))),
+    )
+    .ok();
+    match log_request(
+        &RequestMeta {
+            pool: ctx.pool,
+            session_id: ctx.session_id,
+            method: "POST",
+            path: ctx.stored_path,
+            timestamp: &timestamp,
+            headers_json: headers_json.as_deref(),
+            note: Some(&note),
+        },
+        &fields,
+    )
+    .await
+    {
+        Ok(id) => Ok(id),
+        Err(e) => {
+            log::warn!("webfetch agent: failed to log request: {}", e);
+            Err(())
+        }
+    }
+}
+
+/// Send the agent request upstream and return `(status, headers, body)`.
+async fn send_upstream_agent_request(
+    ctx: &FetchContext<'_>,
+    agent_body: &Value,
+) -> Result<(u16, reqwest::header::HeaderMap, bytes::Bytes), ()> {
+    let agent_bytes = match serde_json::to_vec(agent_body) {
+        Ok(b) => b,
+        Err(_) => return Err(()),
+    };
+
+    let mut agent_headers = ctx.forward_headers.clone();
+    agent_headers.remove(reqwest::header::CONTENT_LENGTH);
+
+    let agent_response = match ctx
+        .client
+        .post(ctx.target_url)
+        .headers(agent_headers)
+        .body(agent_bytes)
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            log::warn!("webfetch agent: upstream request failed: {}", e);
+            return Err(());
+        }
+    };
+
+    let resp_status = agent_response.status().as_u16();
+    let resp_headers = agent_response.headers().clone();
+    let resp_body = match agent_response.bytes().await {
+        Ok(b) => b,
+        Err(e) => {
+            log::warn!("webfetch agent: failed to read response: {}", e);
+            return Err(());
+        }
+    };
+
+    Ok((resp_status, resp_headers, resp_body))
+}
+
+/// Store the agent response in the database.
+async fn store_agent_response(
+    ctx: &FetchContext<'_>,
+    agent_request_id: &str,
+    resp_status: u16,
+    resp_headers: &reqwest::header::HeaderMap,
+    resp_body_str: &str,
+) {
+    let resp_headers_json = headers_to_json(
+        resp_headers
+            .iter()
+            .filter_map(|(k, v)| v.to_str().ok().map(|s| (k.to_string(), s.to_string()))),
+    )
+    .ok();
+    if let Err(e) = store_response(
+        ctx.pool,
+        agent_request_id,
+        resp_status,
+        resp_headers_json.as_deref(),
+        resp_body_str,
+    )
+    .await
+    {
+        log::warn!("webfetch agent: failed to store response: {}", e);
+    }
+}
+
 /// Send an agentic API request with the rendered page content and return the
 /// agent's response text as a tool_result. Logs the request and response in the DB.
 /// On failure, falls back to raw content tool_result.
@@ -310,32 +477,9 @@ async fn send_agent_request(
     });
 
     // Log the agent request
-    let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
-    let note = format!("webfetch agent ({})", url_host);
-    let fields = crate::shared::extract_request_fields(&agent_body, None).unwrap_or_default();
-    let headers_json = crate::shared::headers_to_json(
-        ctx.forward_headers
-            .iter()
-            .filter_map(|(k, v)| v.to_str().ok().map(|s| (k.to_string(), s.to_string()))),
-    )
-    .ok();
-    let agent_request_id = match crate::shared::log_request(
-        &crate::shared::RequestMeta {
-            pool: ctx.pool,
-            session_id: ctx.session_id,
-            method: "POST",
-            path: ctx.stored_path,
-            timestamp: &timestamp,
-            headers_json: headers_json.as_deref(),
-            note: Some(&note),
-        },
-        &fields,
-    )
-    .await
-    {
+    let agent_request_id = match log_agent_request(ctx, &agent_body, url_host).await {
         Ok(id) => id,
-        Err(e) => {
-            log::warn!("webfetch agent: failed to log request: {}", e);
+        Err(()) => {
             return AcceptResult {
                 tool_result: serde_json::json!({
                     "type": "tool_result",
@@ -348,86 +492,36 @@ async fn send_agent_request(
     };
 
     // Send the agent request upstream
-    let agent_bytes = match serde_json::to_vec(&agent_body) {
-        Ok(b) => b,
-        Err(_) => {
-            return AcceptResult {
-                tool_result: serde_json::json!({
-                    "type": "tool_result",
-                    "tool_use_id": tool_use_id,
-                    "content": rendered_content,
-                }),
-                agent_request_id: Some(agent_request_id),
-            };
-        }
-    };
-
-    let mut agent_headers = ctx.forward_headers.clone();
-    agent_headers.remove(reqwest::header::CONTENT_LENGTH);
-
-    let resp = match ctx
-        .client
-        .post(ctx.target_url)
-        .headers(agent_headers)
-        .body(agent_bytes)
-        .send()
-        .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            log::warn!("webfetch agent: upstream request failed: {}", e);
-            return AcceptResult {
-                tool_result: serde_json::json!({
-                    "type": "tool_result",
-                    "tool_use_id": tool_use_id,
-                    "content": rendered_content,
-                }),
-                agent_request_id: Some(agent_request_id),
-            };
-        }
-    };
-
-    let resp_status = resp.status().as_u16();
-    let resp_headers = resp.headers().clone();
-    let resp_body = match resp.bytes().await {
-        Ok(b) => b,
-        Err(e) => {
-            log::warn!("webfetch agent: failed to read response: {}", e);
-            return AcceptResult {
-                tool_result: serde_json::json!({
-                    "type": "tool_result",
-                    "tool_use_id": tool_use_id,
-                    "content": rendered_content,
-                }),
-                agent_request_id: Some(agent_request_id),
-            };
-        }
-    };
+    let (resp_status, resp_headers, resp_body) =
+        match send_upstream_agent_request(ctx, &agent_body).await {
+            Ok(result) => result,
+            Err(()) => {
+                return AcceptResult {
+                    tool_result: serde_json::json!({
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "content": rendered_content,
+                    }),
+                    agent_request_id: Some(agent_request_id),
+                };
+            }
+        };
 
     let resp_body_str = String::from_utf8_lossy(&resp_body).to_string();
 
     // Store the response
-    let resp_headers_json = crate::shared::headers_to_json(
-        resp_headers
-            .iter()
-            .filter_map(|(k, v)| v.to_str().ok().map(|s| (k.to_string(), s.to_string()))),
-    )
-    .ok();
-    if let Err(e) = crate::shared::store_response(
-        ctx.pool,
+    store_agent_response(
+        ctx,
         &agent_request_id,
         resp_status,
-        resp_headers_json.as_deref(),
+        &resp_headers,
         &resp_body_str,
     )
-    .await
-    {
-        log::warn!("webfetch agent: failed to store response: {}", e);
-    }
+    .await;
 
     // Extract text from the SSE events
-    let events = crate::sse::parse_sse_events(&resp_body_str);
-    let agent_text = crate::sse::extract_text_from_events(&events);
+    let sse_events = parse_sse_events(&resp_body_str);
+    let agent_text = extract_text_from_events(&sse_events);
 
     if agent_text.is_empty() {
         log::warn!("webfetch agent: no text extracted from response, falling back to raw content");

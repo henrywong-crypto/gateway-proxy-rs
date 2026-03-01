@@ -210,39 +210,30 @@ fn translate_bedrock_request(
     Ok((body, headers))
 }
 
-pub async fn bedrock_streaming_handler(
-    req: HttpRequest,
-    body: web::Bytes,
-    pool: web::Data<SqlitePool>,
-    client: web::Data<reqwest::Client>,
-) -> Result<HttpResponse, actix_web::Error> {
-    let session_id = req
-        .match_info()
-        .get("session_id")
-        .ok_or_else(|| ErrorBadRequest("Missing session_id"))?;
-    let model_id = req
-        .match_info()
-        .get("model_id")
-        .ok_or_else(|| ErrorBadRequest("Missing model_id"))?;
-
-    let session = get_session_or_error(pool.get_ref(), session_id).await?;
-
-    // Return injected error if error injection is active for this session.
-    // Return the error JSON with the correct HTTP status code so clients recognize it.
-    if let Some(ref error_type) = session.error_inject {
-        if !error_type.is_empty() {
-            if let Some(e) = common::error_inject::find_by_key(error_type) {
-                let actix_status = actix_web::http::StatusCode::from_u16(e.status)
-                    .unwrap_or(actix_web::http::StatusCode::INTERNAL_SERVER_ERROR);
-                return Ok(HttpResponse::build(actix_status)
-                    .insert_header((actix_web::http::header::CONTENT_TYPE, "application/json"))
-                    .body(e.data_json));
-            }
-        }
+/// Return an injected error response if error injection is active for this session.
+fn build_bedrock_error_response(error_type: &str) -> Option<HttpResponse> {
+    if error_type.is_empty() {
+        return None;
     }
+    let error_def = common::error_inject::find_by_key(error_type)?;
+    let actix_status = actix_web::http::StatusCode::from_u16(error_def.status)
+        .unwrap_or(actix_web::http::StatusCode::INTERNAL_SERVER_ERROR);
+    Some(
+        HttpResponse::build(actix_status)
+            .insert_header((actix_web::http::header::CONTENT_TYPE, "application/json"))
+            .body(error_def.data_json),
+    )
+}
 
-    // Parse and log the original request
-    let original_data: serde_json::Value = serde_json::from_slice(&body)
+/// Parse and log the original Bedrock request. Returns `(request_id, original_data)`.
+async fn log_bedrock_request(
+    req: &HttpRequest,
+    body: &web::Bytes,
+    pool: &SqlitePool,
+    session_id: &str,
+    model_id: &str,
+) -> Result<(String, serde_json::Value), actix_web::Error> {
+    let original_data: serde_json::Value = serde_json::from_slice(body)
         .map_err(|e| ErrorBadRequest(format!("Invalid JSON body: {}", e)))?;
     if !original_data.is_object() {
         return Err(ErrorBadRequest("Request body must be a JSON object"));
@@ -251,13 +242,13 @@ pub async fn bedrock_streaming_handler(
     let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
     let stored_path = format!("/model/{}/invoke-with-response-stream", model_id);
     let req_headers_json =
-        headers_to_json(actix_headers_iter(&req)).map_err(ErrorInternalServerError)?;
+        headers_to_json(actix_headers_iter(req)).map_err(ErrorInternalServerError)?;
     let fields = extract_request_fields(&original_data, Some(model_id.to_string()))
         .map_err(ErrorInternalServerError)?;
 
     let request_id = log_request(
         &RequestMeta {
-            pool: pool.get_ref(),
+            pool,
             session_id,
             method: "POST",
             path: &stored_path,
@@ -270,98 +261,76 @@ pub async fn bedrock_streaming_handler(
     .await
     .map_err(ErrorInternalServerError)?;
 
-    // Apply filters to the data before forwarding
-    let mut filtered_data = original_data.clone();
-    if let Some(filters) =
-        load_filters_for_profile(pool.get_ref(), session.profile_id.as_deref()).await
-    {
+    Ok((request_id, original_data))
+}
+
+/// Apply filters to request data before forwarding.
+async fn apply_bedrock_filters(
+    pool: &SqlitePool,
+    profile_id: Option<&str>,
+    mut data: serde_json::Value,
+) -> serde_json::Value {
+    if let Some(filters) = load_filters_for_profile(pool, profile_id).await {
         crate::filter::apply_filters(
-            &mut filtered_data,
+            &mut data,
             &filters.system_filters,
             &filters.tool_filters,
             filters.keep_tool_pairs,
         );
     }
+    data
+}
 
-    // Translate request and send upstream
-    let (translated_body, forward_headers) = translate_bedrock_request(
-        &req,
-        filtered_data,
-        model_id,
-        session.auth_header.as_deref(),
-        session.x_api_key.as_deref(),
-    )?;
-
-    let target_url = format!("{}/v1/messages", session.target_url.trim_end_matches('/'));
-    let effective_client = effective_client(&session, client.get_ref());
-
-    log::info!("{} POST {} -> {}", session.name, stored_path, target_url);
-
-    let upstream = effective_client
-        .post(&target_url)
-        .headers(forward_headers)
-        .body(translated_body)
-        .send()
-        .await
-        .map_err(|e| ErrorBadGateway(format!("Upstream error: {}", e)))?;
-
-    let status = upstream.status().as_u16();
-    let resp_headers_json = headers_to_json(
-        upstream
-            .headers()
-            .iter()
-            .filter_map(|(k, v)| v.to_str().ok().map(|s| (k.to_string(), s.to_string()))),
-    )
-    .map_err(ErrorInternalServerError)?;
+/// Store a non-200 error response and return it as an HttpResponse.
+async fn store_bedrock_error_response(
+    pool: &SqlitePool,
+    request_id: &str,
+    status: u16,
+    resp_headers_json: &str,
+    upstream: reqwest::Response,
+) -> Result<HttpResponse, actix_web::Error> {
     let actix_status = to_actix_status(status)?;
-
-    // For non-200 responses, return the error body directly instead of
-    // trying to parse it as SSE (upstream returns plain JSON for errors).
-    if status != 200 {
-        let error_body = upstream
-            .bytes()
-            .await
-            .map_err(|e| ErrorBadGateway(format!("Failed to read error body: {}", e)))?;
-
-        let body_str = String::from_utf8_lossy(&error_body);
-        let events = parse_sse_events(&body_str);
-        let events_json = serde_json::to_string(&events).unwrap_or_else(|_| "[]".to_string());
-
-        if let Err(e) = db::set_request_response(
-            pool.get_ref(),
-            &request_id,
-            status as i64,
-            Some(&resp_headers_json),
-            Some(&body_str),
-            Some(&events_json),
-        )
+    let error_body = upstream
+        .bytes()
         .await
-        {
-            log::warn!("bedrock: failed to store error response: {}", e);
-        }
+        .map_err(|e| ErrorBadGateway(format!("Failed to read error body: {}", e)))?;
 
-        return Ok(HttpResponse::build(actix_status)
-            .insert_header((actix_web::http::header::CONTENT_TYPE, "application/json"))
-            .body(error_body));
+    let body_str = String::from_utf8_lossy(&error_body);
+    let sse_events = parse_sse_events(&body_str);
+    let sse_events_json = serde_json::to_string(&sse_events).unwrap_or_else(|_| "[]".to_string());
+
+    if let Err(e) = db::set_request_response(
+        pool,
+        request_id,
+        status as i64,
+        Some(resp_headers_json),
+        Some(&body_str),
+        Some(&sse_events_json),
+    )
+    .await
+    {
+        log::warn!("bedrock: failed to store error response: {}", e);
     }
 
-    // Streaming SSE response — convert to Bedrock Event Stream format
-    let mut builder = HttpResponse::build(actix_status);
-    builder.insert_header((
-        actix_web::http::header::CONTENT_TYPE,
-        "application/vnd.amazon.eventstream",
-    ));
+    Ok(HttpResponse::build(actix_status)
+        .insert_header((actix_web::http::header::CONTENT_TYPE, "application/json"))
+        .body(error_body))
+}
 
-    let pool_bg = pool.clone();
-    let request_id_bg = request_id.clone();
-    let resp_headers_json_bg = resp_headers_json.clone();
-
-    let (tx, rx) = futures::channel::mpsc::unbounded::<Result<Bytes, actix_web::Error>>();
-    let mut byte_stream = upstream.bytes_stream();
-
+/// Spawn a background task that reads the upstream SSE stream, converts to
+/// Bedrock Event Stream format, and stores the accumulated response in the DB.
+fn spawn_bedrock_stream_converter(
+    byte_stream: impl futures::Stream<Item = Result<Bytes, reqwest::Error>> + 'static,
+    tx: futures::channel::mpsc::UnboundedSender<Result<Bytes, actix_web::Error>>,
+    pool: web::Data<SqlitePool>,
+    request_id: String,
+    resp_headers_json: String,
+    status: u16,
+) {
     actix_web::rt::spawn(async move {
         let mut accumulated = Vec::new();
         let mut parser = SseParser::new();
+        let mut byte_stream = std::pin::pin!(byte_stream);
 
         while let Some(chunk_result) = byte_stream.next().await {
             match chunk_result {
@@ -394,15 +363,15 @@ pub async fn bedrock_streaming_handler(
         // Store accumulated response to DB
         let store: anyhow::Result<()> = async {
             let body_str = String::from_utf8_lossy(&accumulated);
-            let events = parse_sse_events(&body_str);
-            let events_json = serde_json::to_string(&events)?;
+            let sse_events = parse_sse_events(&body_str);
+            let sse_events_json = serde_json::to_string(&sse_events)?;
             db::set_request_response(
-                pool_bg.get_ref(),
-                &request_id_bg,
+                pool.get_ref(),
+                &request_id,
                 status as i64,
-                Some(&resp_headers_json_bg),
+                Some(&resp_headers_json),
                 Some(&body_str),
-                Some(&events_json),
+                Some(&sse_events_json),
             )
             .await?;
             Ok(())
@@ -412,6 +381,103 @@ pub async fn bedrock_streaming_handler(
             log::error!("Failed to store response: {}", e);
         }
     });
+}
+
+pub async fn bedrock_streaming_handler(
+    req: HttpRequest,
+    body: web::Bytes,
+    pool: web::Data<SqlitePool>,
+    client: web::Data<reqwest::Client>,
+) -> Result<HttpResponse, actix_web::Error> {
+    let session_id = req
+        .match_info()
+        .get("session_id")
+        .ok_or_else(|| ErrorBadRequest("Missing session_id"))?;
+    let model_id = req
+        .match_info()
+        .get("model_id")
+        .ok_or_else(|| ErrorBadRequest("Missing model_id"))?;
+
+    let session = get_session_or_error(pool.get_ref(), session_id).await?;
+
+    // Return injected error if error injection is active for this session.
+    if let Some(ref error_type) = session.error_inject {
+        if let Some(resp) = build_bedrock_error_response(error_type) {
+            return Ok(resp);
+        }
+    }
+
+    // Parse and log the original request
+    let (request_id, original_data) =
+        log_bedrock_request(&req, &body, pool.get_ref(), session_id, model_id).await?;
+
+    // Apply filters to the data before forwarding
+    let filtered_data =
+        apply_bedrock_filters(pool.get_ref(), session.profile_id.as_deref(), original_data).await;
+
+    // Translate request and send upstream
+    let (translated_body, forward_headers) = translate_bedrock_request(
+        &req,
+        filtered_data,
+        model_id,
+        session.auth_header.as_deref(),
+        session.x_api_key.as_deref(),
+    )?;
+
+    let stored_path = format!("/model/{}/invoke-with-response-stream", model_id);
+    let target_url = format!("{}/v1/messages", session.target_url.trim_end_matches('/'));
+    let effective_client = effective_client(&session, client.get_ref());
+
+    log::info!("{} POST {} -> {}", session.name, stored_path, target_url);
+
+    let upstream = effective_client
+        .post(&target_url)
+        .headers(forward_headers)
+        .body(translated_body)
+        .send()
+        .await
+        .map_err(|e| ErrorBadGateway(format!("Upstream error: {}", e)))?;
+
+    let status = upstream.status().as_u16();
+    let resp_headers_json = headers_to_json(
+        upstream
+            .headers()
+            .iter()
+            .filter_map(|(k, v)| v.to_str().ok().map(|s| (k.to_string(), s.to_string()))),
+    )
+    .map_err(ErrorInternalServerError)?;
+
+    // For non-200 responses, return the error body directly instead of
+    // trying to parse it as SSE (upstream returns plain JSON for errors).
+    if status != 200 {
+        return store_bedrock_error_response(
+            pool.get_ref(),
+            &request_id,
+            status,
+            &resp_headers_json,
+            upstream,
+        )
+        .await;
+    }
+
+    // Streaming SSE response — convert to Bedrock Event Stream format
+    let actix_status = to_actix_status(status)?;
+    let mut builder = HttpResponse::build(actix_status);
+    builder.insert_header((
+        actix_web::http::header::CONTENT_TYPE,
+        "application/vnd.amazon.eventstream",
+    ));
+
+    let (tx, rx) = futures::channel::mpsc::unbounded::<Result<Bytes, actix_web::Error>>();
+
+    spawn_bedrock_stream_converter(
+        upstream.bytes_stream(),
+        tx,
+        pool.clone(),
+        request_id,
+        resp_headers_json,
+        status,
+    );
 
     Ok(builder.streaming(rx))
 }
@@ -479,6 +545,45 @@ mod tests {
         let mut parser = SseParser::new();
         let events = parser.feed("event: cr\r\ndata: value\r\n\r\n");
         assert_eq!(events, vec!["value"]);
+    }
+
+    // --- build_bedrock_error_response tests ---
+
+    #[test]
+    fn bedrock_error_response_empty_string() {
+        assert!(build_bedrock_error_response("").is_none());
+    }
+
+    #[test]
+    fn bedrock_error_response_unknown_key() {
+        assert!(build_bedrock_error_response("nonexistent_error").is_none());
+    }
+
+    #[test]
+    fn bedrock_error_response_invalid_request() {
+        let resp = build_bedrock_error_response("invalid_request_error").unwrap();
+        assert_eq!(resp.status(), actix_web::http::StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn bedrock_error_response_permission_error() {
+        let resp = build_bedrock_error_response("permission_error").unwrap();
+        assert_eq!(resp.status(), actix_web::http::StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn bedrock_error_response_not_found() {
+        let resp = build_bedrock_error_response("not_found_error").unwrap();
+        assert_eq!(resp.status(), actix_web::http::StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn bedrock_error_response_request_too_large() {
+        let resp = build_bedrock_error_response("request_too_large").unwrap();
+        assert_eq!(
+            resp.status(),
+            actix_web::http::StatusCode::PAYLOAD_TOO_LARGE
+        );
     }
 
     // --- Event Stream encoding tests ---

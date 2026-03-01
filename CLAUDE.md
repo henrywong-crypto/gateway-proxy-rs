@@ -107,6 +107,165 @@ fn animal_name(id: &str) -> String;
 fn set_animal(id: &str, name: &str) -> Result<()>;  // use set_animal_name
 ```
 
+### Variable Naming
+
+Name variables and parameters after their type in snake_case. For primitives and generic wrappers, use a descriptive domain noun instead.
+
+```rust
+// Good — name matches the type
+let feed_schedule: FeedSchedule = build_feed_schedule(&feed_request);
+let cage_report: CageReport = build_cage_report(&cage);
+let animals: Vec<Animal> = list_animals(db);
+let cage: Cage = get_cage(cage_id)?;
+
+// Good — primitives use a descriptive domain noun
+let feed_cost: f64 = compute_feed_cost(&feed_schedule);
+let animal_count: i64 = count_animals(db);
+let cage_name: &str = extract_cage_name(&cage);
+
+// Bad — generic names that don't reflect the type or domain
+let schedule: FeedSchedule = build_feed_schedule(&feed_request);  // use feed_schedule
+let result: CageReport = build_cage_report(&cage);  // use cage_report
+let data: Vec<Animal> = list_animals(db);  // use animals
+let n: i64 = count_animals(db);  // use animal_count
+let val: f64 = compute_feed_cost(&feed_schedule);  // use feed_cost
+```
+
+### Function Boundaries
+
+Keep each function at **one level of abstraction**. When a function has distinct sequential phases or repeated structural blocks, extract each into its own named function. A good rule of thumb: if you can give a block of code a meaningful verb-noun name that differs from the parent function, it should be its own function.
+
+#### Sequential pipeline — extract each phase
+
+```rust
+// Good — each phase is a small, testable function
+fn handle_feed_request(feed_request: &FeedRequest, db: &Db) -> Result<FeedResponse> {
+    let feed_request = validate_feed_request(feed_request)?;
+    let feed_schedule = build_feed_schedule(&feed_request);
+    let feed_cost = compute_feed_cost(&feed_schedule);
+    let feed_receipt = store_feed_receipt(db, &feed_schedule, feed_cost)?;
+    build_feed_response(&feed_receipt)
+}
+
+fn validate_feed_request(feed_request: &FeedRequest) -> Result<FeedRequest> { /* 10–20 lines */ }
+fn build_feed_schedule(feed_request: &FeedRequest) -> FeedSchedule { /* 10–20 lines */ }
+fn compute_feed_cost(feed_schedule: &FeedSchedule) -> f64 { /* 5–10 lines */ }
+fn store_feed_receipt(db: &Db, feed_schedule: &FeedSchedule, feed_cost: f64) -> Result<FeedReceipt> { /* 10 lines */ }
+fn build_feed_response(feed_receipt: &FeedReceipt) -> Result<FeedResponse> { /* 5–10 lines */ }
+
+// Bad — one giant function doing validation, building, costing, storing, responding
+fn handle_feed_request(feed_request: &FeedRequest, db: &Db) -> Result<FeedResponse> {
+    // ... 30 lines of validation ...
+    // ... 20 lines building schedule ...
+    // ... 15 lines computing cost ...
+    // ... 10 lines storing to db ...
+    // ... 10 lines building response ...
+}
+```
+
+#### Loop with a complex body — extract the body
+
+```rust
+// Good — loop body is its own function
+fn build_inspection_reports(cages: &[Cage], db: &Db) -> Vec<InspectionReport> {
+    cages.iter().map(|cage| build_inspection_report(cage, db)).collect()
+}
+
+fn build_inspection_report(cage: &Cage, db: &Db) -> InspectionReport {
+    let cage_temperature = measure_cage_temperature(cage);
+    let cage_cleanliness = evaluate_cage_cleanliness(cage);
+    let cage_animals = list_cage_animals(db, cage.id);
+    InspectionReport { cage_temperature, cage_cleanliness, cage_animals }
+}
+
+// Bad — everything inlined inside the loop
+fn build_inspection_reports(cages: &[Cage], db: &Db) -> Vec<InspectionReport> {
+    let mut inspection_reports = Vec::new();
+    for cage in cages {
+        // ... 15 lines measuring temperature ...
+        // ... 15 lines evaluating cleanliness ...
+        // ... 10 lines querying animals ...
+        // ... 10 lines building report ...
+        inspection_reports.push(inspection_report);
+    }
+    inspection_reports
+}
+```
+
+#### Rendering with distinct sections — extract each section
+
+```rust
+// Good — parent composes named section renderers
+fn render_cage_detail_view(cage: &Cage, cage_animals: &[CageAnimal]) -> String {
+    let cage_breadcrumb = render_cage_breadcrumb(cage);
+    let cage_info_section = render_cage_info_section(cage);
+    let cage_animal_list = render_cage_animal_list(cage_animals);
+    let cage_controls = render_cage_controls(cage);
+    format!("{cage_breadcrumb}{cage_info_section}{cage_animal_list}{cage_controls}")
+}
+
+fn render_cage_breadcrumb(cage: &Cage) -> String { /* 10 lines */ }
+fn render_cage_info_section(cage: &Cage) -> String { /* 15 lines */ }
+fn render_cage_animal_list(cage_animals: &[CageAnimal]) -> String { /* 20 lines */ }
+fn render_cage_controls(cage: &Cage) -> String { /* 15 lines */ }
+
+// Bad — one function with 80+ lines of concatenated HTML
+fn render_cage_detail_view(cage: &Cage, cage_animals: &[CageAnimal]) -> String {
+    let mut html = String::new();
+    // ... 10 lines breadcrumb ...
+    // ... 15 lines info section ...
+    // ... 20 lines animal list ...
+    // ... 15 lines controls ...
+    html
+}
+```
+
+#### Branching on variant — extract each branch
+
+```rust
+// Good — each variant handled by its own function
+fn render_enclosure_block(enclosure_block: &EnclosureBlock) -> String {
+    match enclosure_block {
+        EnclosureBlock::Habitat(habitat) => render_habitat_block(habitat),
+        EnclosureBlock::FeedStation(feed_station) => render_feed_station_block(feed_station),
+        EnclosureBlock::Observation(observation) => render_observation_block(observation),
+    }
+}
+
+fn render_habitat_block(habitat: &Habitat) -> String { /* 15 lines */ }
+fn render_feed_station_block(feed_station: &FeedStation) -> String { /* 20 lines */ }
+fn render_observation_block(observation: &Observation) -> String { /* 15 lines */ }
+
+// Bad — all branches inlined in one long match
+fn render_enclosure_block(enclosure_block: &EnclosureBlock) -> String {
+    match enclosure_block {
+        EnclosureBlock::Habitat(habitat) => {
+            // ... 15 lines ...
+        }
+        EnclosureBlock::FeedStation(feed_station) => {
+            // ... 20 lines ...
+        }
+        EnclosureBlock::Observation(observation) => {
+            // ... 15 lines ...
+        }
+    }
+}
+```
+
+### Function Arguments
+
+Prefer references (`&`) over owned values in function arguments. Do not use `mut` on parameters unless the function body actually mutates the value.
+
+```rust
+// Good — borrows where possible, no unnecessary mut
+fn build_feed_schedule(feed_request: &FeedRequest) -> FeedSchedule;
+fn apply_filters(data: &mut Value, filters: &[String]);  // mut needed: modifies data in place
+
+// Bad — takes ownership or uses mut unnecessarily
+fn build_feed_schedule(feed_request: FeedRequest) -> FeedSchedule;  // use &FeedRequest
+fn compute_feed_cost(mut schedule: FeedSchedule) -> f64;  // use &FeedSchedule if not mutated
+```
+
 ### Versioning
 
 All crate versions use 3-part semver (e.g. `0.1.0`).

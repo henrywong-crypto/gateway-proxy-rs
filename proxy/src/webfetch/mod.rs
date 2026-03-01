@@ -15,10 +15,14 @@ use serde_json::Value;
 
 use self::extract::{
     build_followup_body, build_input_summary, extract_webfetch_from_sse, is_all_whitelisted,
-    retain_matched_tool_blocks, InterceptedTools,
+    retain_matched_tool_blocks, InterceptedTools, ToolUse,
 };
 use self::fetch::{build_accept_result, FetchContext};
 use self::mock::{build_fail_result, build_mock_result};
+use crate::shared::{
+    extract_request_fields, headers_to_json, log_request, store_response, RequestMeta,
+};
+use crate::sse::parse_sse_events;
 
 /// Maximum number of intercept rounds to prevent infinite loops.
 const MAX_INTERCEPT_ROUNDS: usize = 10;
@@ -136,15 +140,15 @@ struct FollowupRoundContext<'a> {
 async fn log_followup_round(ctx: &FollowupRoundContext<'_>) -> Option<String> {
     let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
     let note = format!("webfetch follow-up (round {})", ctx.round_idx + 1);
-    let fields = crate::shared::extract_request_fields(ctx.followup_body, None).unwrap_or_default();
-    let headers_json = crate::shared::headers_to_json(
+    let fields = extract_request_fields(ctx.followup_body, None).unwrap_or_default();
+    let headers_json = headers_to_json(
         ctx.headers
             .iter()
             .filter_map(|(k, v)| v.to_str().ok().map(|s| (k.to_string(), s.to_string()))),
     )
     .ok();
-    match crate::shared::log_request(
-        &crate::shared::RequestMeta {
+    match log_request(
+        &RequestMeta {
             pool: ctx.pool,
             session_id: ctx.session_id,
             method: "POST",
@@ -158,13 +162,13 @@ async fn log_followup_round(ctx: &FollowupRoundContext<'_>) -> Option<String> {
     .await
     {
         Ok(id) => {
-            let resp_headers_json = crate::shared::headers_to_json(
+            let resp_headers_json = headers_to_json(
                 ctx.final_headers
                     .iter()
                     .filter_map(|(k, v)| v.to_str().ok().map(|s| (k.to_string(), s.to_string()))),
             )
             .ok();
-            if let Err(e) = crate::shared::store_response(
+            if let Err(e) = store_response(
                 ctx.pool,
                 &id,
                 ctx.final_status,
@@ -185,6 +189,136 @@ async fn log_followup_round(ctx: &FollowupRoundContext<'_>) -> Option<String> {
             None
         }
     }
+}
+
+/// Build tool results for a single round based on the approval decision.
+async fn build_tool_results(
+    decision: &ApprovalDecision,
+    tool_uses: &[ToolUse],
+    config: &AppConfig,
+    ctx: &FetchContext<'_>,
+) -> (Vec<Value>, Vec<Option<String>>) {
+    match decision {
+        ApprovalDecision::Fail => {
+            let results: Vec<Value> = tool_uses.iter().map(build_fail_result).collect();
+            let ids = vec![None; results.len()];
+            (results, ids)
+        }
+        ApprovalDecision::Mock => {
+            let results: Vec<Value> = tool_uses
+                .iter()
+                .map(|tu| build_mock_result(tu, &config.webfetch_mock_prompt))
+                .collect();
+            let ids = vec![None; results.len()];
+            (results, ids)
+        }
+        ApprovalDecision::Accept => {
+            let mut results = Vec::with_capacity(tool_uses.len());
+            let mut ids = Vec::with_capacity(tool_uses.len());
+            for tu in tool_uses {
+                let accept = build_accept_result(tu, ctx).await;
+                results.push(accept.tool_result);
+                ids.push(accept.agent_request_id);
+            }
+            (results, ids)
+        }
+    }
+}
+
+/// Send a follow-up request to the upstream API and return the response.
+async fn send_followup_request(
+    client: &reqwest::Client,
+    target_url: &str,
+    headers: &reqwest::header::HeaderMap,
+    followup_body: &Value,
+) -> Option<(u16, reqwest::header::HeaderMap, bytes::Bytes)> {
+    let followup_bytes = match serde_json::to_vec(followup_body) {
+        Ok(v) => v,
+        Err(e) => {
+            log::warn!(
+                "WebFetch interception: failed to serialize follow-up body: {}",
+                e
+            );
+            return None;
+        }
+    };
+
+    let followup_response = match client
+        .post(target_url)
+        .headers(headers.clone())
+        .body(followup_bytes)
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            log::warn!("WebFetch interception: follow-up request failed: {}", e);
+            return None;
+        }
+    };
+
+    let status = followup_response.status().as_u16();
+    let response_headers = followup_response.headers().clone();
+
+    let body = match followup_response.bytes().await {
+        Ok(b) => b,
+        Err(e) => {
+            log::warn!(
+                "WebFetch interception: failed to read follow-up response: {}",
+                e
+            );
+            return None;
+        }
+    };
+
+    Some((status, response_headers, body))
+}
+
+/// Build the note string summarizing the interception.
+fn build_intercept_note(all_tool_names: &[String], round_count: usize) -> String {
+    if round_count == 1 {
+        format!("webfetch intercepted: {}", all_tool_names.join(", "))
+    } else {
+        format!(
+            "webfetch intercepted ({} rounds): {}",
+            round_count,
+            all_tool_names.join(", ")
+        )
+    }
+}
+
+/// Serialize rounds data into `(followup_body_json, rounds_json)`.
+fn serialize_rounds(rounds: &[RoundData]) -> Option<(String, String)> {
+    // First round's followup body for backward compatibility
+    let followup_body_json_str = match serde_json::to_string_pretty(&rounds[0].followup_body) {
+        Ok(v) => v,
+        Err(e) => {
+            log::warn!(
+                "WebFetch interception: failed to serialize follow-up body: {}",
+                e
+            );
+            return None;
+        }
+    };
+
+    // Serialize all rounds to JSON
+    let rounds_value: Vec<Value> = rounds
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "decision": r.decision,
+                "tool_names": r.tool_names,
+                "request_id": r.request_id,
+                "agent_request_ids": r.agent_request_ids,
+                "followup_body": r.followup_body,
+                "response_body": r.response_body,
+                "response_events": r.response_events,
+            })
+        })
+        .collect();
+    let rounds_json = serde_json::to_string(&rounds_value).unwrap_or_default();
+
+    Some((followup_body_json_str, rounds_json))
 }
 
 /// Main entry point for webfetch interception.
@@ -209,12 +343,12 @@ pub async fn maybe_intercept(params: &InterceptParams<'_>) -> Option<InterceptRe
     let webfetch_names = params.webfetch_names;
     let config = params.config;
 
-    let events = crate::sse::parse_sse_events(response_body);
+    let sse_events = parse_sse_events(response_body);
 
     let InterceptedTools {
         mut content_blocks,
         tool_uses,
-    } = extract_webfetch_from_sse(&events, webfetch_names)?;
+    } = extract_webfetch_from_sse(&sse_events, webfetch_names)?;
 
     // Remove tool_use content blocks that were filtered out, so the
     // follow-up body stays consistent with the tool_results we provide.
@@ -246,6 +380,19 @@ pub async fn maybe_intercept(params: &InterceptParams<'_>) -> Option<InterceptRe
     let mut final_status: u16 = 0;
     let mut final_headers = reqwest::header::HeaderMap::new();
     let mut final_body = bytes::Bytes::new();
+
+    let fetch_ctx = FetchContext {
+        client,
+        webfetch_names,
+        accept_prompt: &config.webfetch_accept_prompt,
+        redirect_prompt: &config.webfetch_redirect_prompt,
+        agent_model: &config.webfetch_agent_model,
+        target_url,
+        forward_headers: &headers,
+        pool,
+        session_id,
+        stored_path,
+    };
 
     for round_idx in 0..MAX_INTERCEPT_ROUNDS {
         let intercepted_tools: Vec<&str> =
@@ -285,88 +432,21 @@ pub async fn maybe_intercept(params: &InterceptParams<'_>) -> Option<InterceptRe
             decision
         );
 
-        let (tool_results, agent_request_ids): (Vec<Value>, Vec<Option<String>>) = match decision {
-            ApprovalDecision::Fail => {
-                let results: Vec<Value> = current_tool_uses.iter().map(build_fail_result).collect();
-                let ids = vec![None; results.len()];
-                (results, ids)
-            }
-            ApprovalDecision::Mock => {
-                let results: Vec<Value> = current_tool_uses
-                    .iter()
-                    .map(|tu| build_mock_result(tu, &config.webfetch_mock_prompt))
-                    .collect();
-                let ids = vec![None; results.len()];
-                (results, ids)
-            }
-            ApprovalDecision::Accept => {
-                let ctx = FetchContext {
-                    client,
-                    webfetch_names,
-                    accept_prompt: &config.webfetch_accept_prompt,
-                    redirect_prompt: &config.webfetch_redirect_prompt,
-                    agent_model: &config.webfetch_agent_model,
-                    target_url,
-                    forward_headers: &headers,
-                    pool,
-                    session_id,
-                    stored_path,
-                };
-                let mut results = Vec::with_capacity(current_tool_uses.len());
-                let mut ids = Vec::with_capacity(current_tool_uses.len());
-                for tu in &current_tool_uses {
-                    let accept = build_accept_result(tu, &ctx).await;
-                    results.push(accept.tool_result);
-                    ids.push(accept.agent_request_id);
-                }
-                (results, ids)
-            }
-        };
+        let (tool_results, agent_request_ids) =
+            build_tool_results(&decision, &current_tool_uses, config, &fetch_ctx).await;
 
         let followup_body =
             build_followup_body(&current_body, current_content_blocks, tool_results);
 
-        let followup_bytes = match serde_json::to_vec(&followup_body) {
-            Ok(v) => v,
-            Err(e) => {
-                log::warn!(
-                    "WebFetch interception: failed to serialize follow-up body: {}",
-                    e
-                );
-                return None;
-            }
-        };
+        let (followup_status, followup_headers, followup_body_bytes) =
+            send_followup_request(client, target_url, &headers, &followup_body).await?;
 
-        let resp = match client
-            .post(target_url)
-            .headers(headers.clone())
-            .body(followup_bytes)
-            .send()
-            .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                log::warn!("WebFetch interception: follow-up request failed: {}", e);
-                return None;
-            }
-        };
-
-        final_status = resp.status().as_u16();
-        final_headers = resp.headers().clone();
-
-        final_body = match resp.bytes().await {
-            Ok(b) => b,
-            Err(e) => {
-                log::warn!(
-                    "WebFetch interception: failed to read follow-up response: {}",
-                    e
-                );
-                return None;
-            }
-        };
+        final_status = followup_status;
+        final_headers = followup_headers;
+        final_body = followup_body_bytes;
 
         let response_body_str = String::from_utf8_lossy(&final_body).to_string();
-        let response_events = crate::sse::parse_sse_events(&response_body_str);
+        let response_events = parse_sse_events(&response_body_str);
 
         // Log the follow-up as a separate request entry
         let round_request_id = log_followup_round(&FollowupRoundContext {
@@ -426,52 +506,15 @@ pub async fn maybe_intercept(params: &InterceptParams<'_>) -> Option<InterceptRe
         );
     }
 
-    // Build note
-    let note = if rounds.len() == 1 {
-        format!("webfetch intercepted: {}", all_tool_names.join(", "))
-    } else {
-        format!(
-            "webfetch intercepted ({} rounds): {}",
-            rounds.len(),
-            all_tool_names.join(", ")
-        )
-    };
-
-    // First round's followup body for backward compatibility
-    let followup_body_json_str = match serde_json::to_string_pretty(&rounds[0].followup_body) {
-        Ok(v) => v,
-        Err(e) => {
-            log::warn!(
-                "WebFetch interception: failed to serialize follow-up body: {}",
-                e
-            );
-            return None;
-        }
-    };
-
-    // Serialize all rounds to JSON
-    let rounds_value: Vec<Value> = rounds
-        .iter()
-        .map(|r| {
-            serde_json::json!({
-                "decision": r.decision,
-                "tool_names": r.tool_names,
-                "request_id": r.request_id,
-                "agent_request_ids": r.agent_request_ids,
-                "followup_body": r.followup_body,
-                "response_body": r.response_body,
-                "response_events": r.response_events,
-            })
-        })
-        .collect();
-    let rounds_json = serde_json::to_string(&rounds_value).unwrap_or_default();
+    let note = build_intercept_note(&all_tool_names, rounds.len());
+    let (followup_body_json, rounds_json) = serialize_rounds(&rounds)?;
 
     Some(InterceptResult::Intercepted {
         status: final_status,
         headers: final_headers,
         body: final_body,
         note,
-        followup_body_json: followup_body_json_str,
+        followup_body_json,
         rounds_json,
     })
 }
@@ -490,6 +533,94 @@ mod tests {
 
     fn default_wf_names() -> Vec<String> {
         vec!["WebFetch".to_string()]
+    }
+
+    // --- build_intercept_note tests ---
+
+    #[test]
+    fn test_build_intercept_note_single_round() {
+        let names = vec!["WebFetch".to_string()];
+        assert_eq!(
+            build_intercept_note(&names, 1),
+            "webfetch intercepted: WebFetch"
+        );
+    }
+
+    #[test]
+    fn test_build_intercept_note_multiple_rounds() {
+        let names = vec!["WebFetch".to_string(), "WebSearch".to_string()];
+        assert_eq!(
+            build_intercept_note(&names, 3),
+            "webfetch intercepted (3 rounds): WebFetch, WebSearch"
+        );
+    }
+
+    #[test]
+    fn test_build_intercept_note_single_round_multiple_tools() {
+        let names = vec![
+            "WebFetch".to_string(),
+            "WebSearch".to_string(),
+            "WebFetch".to_string(),
+        ];
+        assert_eq!(
+            build_intercept_note(&names, 1),
+            "webfetch intercepted: WebFetch, WebSearch, WebFetch"
+        );
+    }
+
+    // --- serialize_rounds tests ---
+
+    #[test]
+    fn test_serialize_rounds_single() {
+        let rounds = vec![RoundData {
+            decision: "Accept".to_string(),
+            tool_names: vec!["WebFetch".to_string()],
+            request_id: Some("req_1".to_string()),
+            agent_request_ids: vec![Some("agent_1".to_string())],
+            followup_body: serde_json::json!({"model": "test", "messages": []}),
+            response_body: "response data".to_string(),
+            response_events: vec![serde_json::json!({"event": "message_start"})],
+        }];
+        let (followup_json, rounds_json) = serialize_rounds(&rounds).unwrap();
+        // followup_json should be the pretty-printed first round's followup body
+        let parsed: serde_json::Value = serde_json::from_str(&followup_json).unwrap();
+        assert_eq!(parsed["model"], "test");
+        // rounds_json should be a valid JSON array
+        let parsed_rounds: Vec<serde_json::Value> = serde_json::from_str(&rounds_json).unwrap();
+        assert_eq!(parsed_rounds.len(), 1);
+        assert_eq!(parsed_rounds[0]["decision"], "Accept");
+        assert_eq!(parsed_rounds[0]["tool_names"][0], "WebFetch");
+    }
+
+    #[test]
+    fn test_serialize_rounds_multiple() {
+        let rounds = vec![
+            RoundData {
+                decision: "Accept".to_string(),
+                tool_names: vec!["WebFetch".to_string()],
+                request_id: Some("req_1".to_string()),
+                agent_request_ids: vec![None],
+                followup_body: serde_json::json!({"round": 1}),
+                response_body: "resp1".to_string(),
+                response_events: vec![],
+            },
+            RoundData {
+                decision: "Mock".to_string(),
+                tool_names: vec!["WebSearch".to_string()],
+                request_id: None,
+                agent_request_ids: vec![],
+                followup_body: serde_json::json!({"round": 2}),
+                response_body: "resp2".to_string(),
+                response_events: vec![],
+            },
+        ];
+        let (followup_json, rounds_json) = serialize_rounds(&rounds).unwrap();
+        // followup_json is always from the first round
+        let parsed: serde_json::Value = serde_json::from_str(&followup_json).unwrap();
+        assert_eq!(parsed["round"], 1);
+        let parsed_rounds: Vec<serde_json::Value> = serde_json::from_str(&rounds_json).unwrap();
+        assert_eq!(parsed_rounds.len(), 2);
+        assert_eq!(parsed_rounds[1]["decision"], "Mock");
     }
 
     #[test]

@@ -17,6 +17,130 @@ use shared::{
 };
 use sqlx::SqlitePool;
 
+async fn apply_request_filters(
+    pool: &SqlitePool,
+    profile_id: Option<&str>,
+    body: &web::Bytes,
+) -> Vec<u8> {
+    if let Some(filters) = load_filters_for_profile(pool, profile_id).await {
+        if let Ok(mut json_body) = serde_json::from_slice::<serde_json::Value>(body) {
+            filter::apply_filters(
+                &mut json_body,
+                &filters.system_filters,
+                &filters.tool_filters,
+                filters.keep_tool_pairs,
+            );
+            return serde_json::to_vec(&json_body).unwrap_or_else(|_| body.to_vec());
+        }
+    }
+    body.to_vec()
+}
+
+fn collect_webfetch_names(session: &common::models::Session) -> Vec<String> {
+    if session.webfetch_intercept {
+        session
+            .webfetch_tool_names
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect()
+    } else {
+        vec![]
+    }
+}
+
+async fn store_webfetch_interception(
+    pool: &SqlitePool,
+    request_id: &str,
+    body_str: &str,
+    followup_body_json: &str,
+    rounds_json: &str,
+    note: Option<&str>,
+    webfetch_note: &str,
+) {
+    let first_events = sse::parse_sse_events(body_str);
+    let first_events_json = serde_json::to_string(&first_events).unwrap_or_default();
+    if let Err(e) = db::set_request_webfetch_data(
+        pool,
+        request_id,
+        Some(body_str),
+        Some(&first_events_json),
+        Some(followup_body_json),
+        Some(rounds_json),
+    )
+    .await
+    {
+        log::warn!("webfetch: failed to store interception data: {}", e);
+    }
+
+    let combined_note = match note {
+        Some(n) => format!("{}; {}", n, webfetch_note),
+        None => webfetch_note.to_string(),
+    };
+    if let Err(e) = db::set_request_note(pool, request_id, &combined_note).await {
+        log::warn!("webfetch: failed to store request note: {}", e);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_session(intercept: bool, tool_names: &str) -> common::models::Session {
+        common::models::Session {
+            id: uuid::Uuid::nil(),
+            name: "test".to_string(),
+            target_url: "https://api.example.com".to_string(),
+            tls_verify_disabled: false,
+            auth_header: None,
+            x_api_key: None,
+            profile_id: None,
+            webfetch_intercept: intercept,
+            webfetch_tool_names: tool_names.to_string(),
+            webfetch_whitelist: None,
+            error_inject: None,
+            created_at: None,
+            request_count: 0,
+        }
+    }
+
+    #[test]
+    fn collect_webfetch_names_intercept_off() {
+        let session = make_session(false, "WebFetch\nWebSearch");
+        assert!(collect_webfetch_names(&session).is_empty());
+    }
+
+    #[test]
+    fn collect_webfetch_names_intercept_on() {
+        let session = make_session(true, "WebFetch\nWebSearch");
+        assert_eq!(
+            collect_webfetch_names(&session),
+            vec!["WebFetch", "WebSearch"]
+        );
+    }
+
+    #[test]
+    fn collect_webfetch_names_empty_lines_and_whitespace() {
+        let session = make_session(true, "  WebFetch  \n\n  WebSearch  \n\n");
+        assert_eq!(
+            collect_webfetch_names(&session),
+            vec!["WebFetch", "WebSearch"]
+        );
+    }
+
+    #[test]
+    fn collect_webfetch_names_empty_string() {
+        let session = make_session(true, "");
+        assert!(collect_webfetch_names(&session).is_empty());
+    }
+
+    #[test]
+    fn collect_webfetch_names_single_name() {
+        let session = make_session(true, "WebFetch");
+        assert_eq!(collect_webfetch_names(&session), vec!["WebFetch"]);
+    }
+}
+
 pub async fn proxy_handler(
     req: HttpRequest,
     body: web::Bytes,
@@ -83,23 +207,8 @@ pub async fn proxy_handler(
     .map_err(ErrorInternalServerError)?;
 
     // Apply filters to the body before forwarding
-    let forward_body = if let Some(filters) =
-        load_filters_for_profile(pool.get_ref(), session.profile_id.as_deref()).await
-    {
-        if let Ok(mut json_body) = serde_json::from_slice::<serde_json::Value>(&body) {
-            filter::apply_filters(
-                &mut json_body,
-                &filters.system_filters,
-                &filters.tool_filters,
-                filters.keep_tool_pairs,
-            );
-            serde_json::to_vec(&json_body).unwrap_or_else(|_| body.to_vec())
-        } else {
-            body.to_vec()
-        }
-    } else {
-        body.to_vec()
-    };
+    let forward_body =
+        apply_request_filters(pool.get_ref(), session.profile_id.as_deref(), &body).await;
 
     // Forward the request upstream
     let forward_headers = build_forward_headers(
@@ -112,17 +221,8 @@ pub async fn proxy_handler(
         .map_err(|e| ErrorBadRequest(format!("Invalid HTTP method: {}", e)))?;
 
     // Save copies for potential webfetch follow-up before the upstream call consumes them
-    let wf_names: Vec<String> = if session.webfetch_intercept {
-        session
-            .webfetch_tool_names
-            .lines()
-            .map(|l| l.trim().to_string())
-            .filter(|l| !l.is_empty())
-            .collect()
-    } else {
-        vec![]
-    };
-    let webfetch_context = if !wf_names.is_empty() {
+    let webfetch_names = collect_webfetch_names(&session);
+    let webfetch_context = if !webfetch_names.is_empty() {
         Some((forward_body.clone(), forward_headers.clone()))
     } else {
         None
@@ -179,7 +279,7 @@ pub async fn proxy_handler(
             whitelist: &whitelist,
             pool: pool.get_ref(),
             stored_path: &stored_path,
-            webfetch_names: &wf_names,
+            webfetch_names: &webfetch_names,
             config: config.get_ref(),
         })
         .await
@@ -188,7 +288,7 @@ pub async fn proxy_handler(
                 status: followup_status,
                 headers: followup_headers,
                 body: followup_body,
-                note: wf_note,
+                note: webfetch_note,
                 followup_body_json,
                 rounds_json,
             } = result;
@@ -217,29 +317,16 @@ pub async fn proxy_handler(
             .map_err(ErrorInternalServerError)?;
 
             // Store webfetch interception data: intercepted response + follow-up body
-            let first_events = sse::parse_sse_events(&body_str);
-            let first_events_json = serde_json::to_string(&first_events).unwrap_or_default();
-            if let Err(e) = db::set_request_webfetch_data(
+            store_webfetch_interception(
                 pool.get_ref(),
                 &request_id,
-                Some(&body_str),
-                Some(&first_events_json),
-                Some(&followup_body_json),
-                Some(&rounds_json),
+                &body_str,
+                &followup_body_json,
+                &rounds_json,
+                note.as_deref(),
+                &webfetch_note,
             )
-            .await
-            {
-                log::warn!("webfetch: failed to store interception data: {}", e);
-            }
-
-            let combined_note = match note {
-                Some(ref n) => format!("{}; {}", n, wf_note),
-                None => wf_note,
-            };
-            if let Err(e) = db::set_request_note(pool.get_ref(), &request_id, &combined_note).await
-            {
-                log::warn!("webfetch: failed to store request note: {}", e);
-            }
+            .await;
 
             return Ok(followup_builder.body(followup_body.to_vec()));
         }

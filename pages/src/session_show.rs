@@ -58,8 +58,8 @@ pub fn render_session_view(session: &Session, port: u16, profile_name: Option<&s
                 },
             ),
             Subpage::new(
-                "Intercept",
-                format!("/_dashboard/sessions/{}/intercept", session.id),
+                "Tool Intercept",
+                format!("/_dashboard/sessions/{}/tool-intercept", session.id),
                 format!(
                     "fetch: {}",
                     if session.webfetch_intercept {

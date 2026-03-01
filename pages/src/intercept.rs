@@ -5,7 +5,7 @@ pub fn render_intercept_view(session: &Session, pending_count: usize) -> String 
     let session_id = session.id.to_string();
 
     Page {
-        title: format!("Gateway Proxy - Session {} - Intercept", session.name),
+        title: format!("Gateway Proxy - Session {} - Tool Intercept", session.name),
         breadcrumbs: vec![
             Breadcrumb::link("Home", "/_dashboard"),
             Breadcrumb::link("Sessions", "/_dashboard/sessions"),
@@ -13,7 +13,7 @@ pub fn render_intercept_view(session: &Session, pending_count: usize) -> String 
                 format!("Session {}", session.name),
                 format!("/_dashboard/sessions/{}", session_id),
             ),
-            Breadcrumb::current("Intercept"),
+            Breadcrumb::current("Tool Intercept"),
         ],
         nav_links: vec![NavLink::back()],
         info_rows: vec![],
@@ -21,7 +21,10 @@ pub fn render_intercept_view(session: &Session, pending_count: usize) -> String 
         subpages: vec![
             Subpage::new(
                 "WebFetch Intercept",
-                format!("/_dashboard/sessions/{}/intercept/webfetch", session_id),
+                format!(
+                    "/_dashboard/sessions/{}/tool-intercept/webfetch",
+                    session_id
+                ),
                 if session.webfetch_intercept {
                     "on"
                 } else {
@@ -30,7 +33,10 @@ pub fn render_intercept_view(session: &Session, pending_count: usize) -> String 
             ),
             Subpage::new(
                 "Pending Approvals",
-                format!("/_dashboard/sessions/{}/intercept/approvals", session_id),
+                format!(
+                    "/_dashboard/sessions/{}/tool-intercept/approvals",
+                    session_id
+                ),
                 pending_count,
             ),
         ],

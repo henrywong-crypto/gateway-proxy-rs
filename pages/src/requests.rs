@@ -102,8 +102,54 @@ pub fn render_requests_view(
     .render()
 }
 
-fn get_message_preview(r: &ProxyRequest) -> (String, String) {
-    let Some(ref msgs_str) = r.messages_json else {
+/// Extract a preview string from a single content block.
+fn extract_block_preview(block: &serde_json::Value) -> String {
+    match block.get("type").and_then(|t| t.as_str()) {
+        Some("text") => block
+            .get("text")
+            .and_then(|t| t.as_str())
+            .unwrap_or("")
+            .to_string(),
+        Some("tool_use") => format!(
+            "tool_use: {}",
+            block.get("name").and_then(|n| n.as_str()).unwrap_or("")
+        ),
+        Some("tool_result") => {
+            let content_preview = if let Some(s) = block.get("content").and_then(|c| c.as_str()) {
+                s.to_string()
+            } else if let Some(arr) = block.get("content").and_then(|c| c.as_array()) {
+                arr.iter()
+                    .filter_map(|b| {
+                        if b.get("type").and_then(|t| t.as_str()) == Some("text") {
+                            b.get("text").and_then(|t| t.as_str())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            } else {
+                String::new()
+            };
+            if content_preview.is_empty() {
+                "tool_result".to_string()
+            } else {
+                let preview = content_preview.replace('\n', " ");
+                if preview.len() > 60 {
+                    let truncated: String = preview.chars().take(60).collect();
+                    format!("tool_result: {}...", truncated)
+                } else {
+                    format!("tool_result: {}", preview)
+                }
+            }
+        }
+        Some(t) => t.to_string(),
+        None => String::new(),
+    }
+}
+
+fn get_message_preview(proxy_request: &ProxyRequest) -> (String, String) {
+    let Some(ref msgs_str) = proxy_request.messages_json else {
         return (String::new(), String::new());
     };
     let Ok(msgs) = serde_json::from_str::<Vec<serde_json::Value>>(msgs_str) else {
@@ -129,49 +175,7 @@ fn get_message_preview(r: &ProxyRequest) -> (String, String) {
         s.to_string()
     } else if let Some(arr) = content.as_array() {
         if let Some(block) = arr.last() {
-            match block.get("type").and_then(|t| t.as_str()) {
-                Some("text") => block
-                    .get("text")
-                    .and_then(|t| t.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                Some("tool_use") => format!(
-                    "tool_use: {}",
-                    block.get("name").and_then(|n| n.as_str()).unwrap_or("")
-                ),
-                Some("tool_result") => {
-                    let content_preview =
-                        if let Some(s) = block.get("content").and_then(|c| c.as_str()) {
-                            s.to_string()
-                        } else if let Some(arr) = block.get("content").and_then(|c| c.as_array()) {
-                            arr.iter()
-                                .filter_map(|b| {
-                                    if b.get("type").and_then(|t| t.as_str()) == Some("text") {
-                                        b.get("text").and_then(|t| t.as_str())
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .collect::<Vec<_>>()
-                                .join(" ")
-                        } else {
-                            String::new()
-                        };
-                    if content_preview.is_empty() {
-                        "tool_result".to_string()
-                    } else {
-                        let preview = content_preview.replace('\n', " ");
-                        if preview.len() > 60 {
-                            let truncated: String = preview.chars().take(60).collect();
-                            format!("tool_result: {}...", truncated)
-                        } else {
-                            format!("tool_result: {}", preview)
-                        }
-                    }
-                }
-                Some(t) => t.to_string(),
-                None => String::new(),
-            }
+            extract_block_preview(block)
         } else {
             String::new()
         }
@@ -188,22 +192,19 @@ fn get_message_preview(r: &ProxyRequest) -> (String, String) {
     }
 }
 
-fn get_response_summary(r: &ProxyRequest) -> (String, String) {
-    let Some(ref events_json) = r.response_events_json else {
-        return match r.response_status {
-            Some(status) => (String::new(), format!("{}", status)),
-            None => (String::new(), String::new()),
-        };
-    };
-    let Ok(events) = serde_json::from_str::<Vec<serde_json::Value>>(events_json) else {
-        return (String::new(), String::new());
-    };
-
+/// Accumulate block metadata (types, names, text) from SSE events.
+fn accumulate_sse_block_metadata(
+    sse_events: &[serde_json::Value],
+) -> (
+    HashMap<i64, String>,
+    HashMap<i64, String>,
+    HashMap<i64, String>,
+) {
     let mut block_types: HashMap<i64, String> = HashMap::new();
     let mut block_names: HashMap<i64, String> = HashMap::new();
     let mut block_text: HashMap<i64, String> = HashMap::new();
 
-    for event in &events {
+    for event in sse_events {
         let event_type = event.get("event").and_then(|e| e.as_str()).unwrap_or("");
         let data = &event["data"];
 
@@ -252,8 +253,15 @@ fn get_response_summary(r: &ProxyRequest) -> (String, String) {
         }
     }
 
-    // Show only the last content block's summary, prefixed with block count
-    let num_blocks = block_types.len();
+    (block_types, block_names, block_text)
+}
+
+/// Format the last block's summary string from accumulated metadata.
+fn format_last_block_summary(
+    block_types: &HashMap<i64, String>,
+    block_names: &HashMap<i64, String>,
+    block_text: &HashMap<i64, String>,
+) -> String {
     let last_index = {
         let mut indices: Vec<i64> = block_types.keys().copied().collect();
         indices.sort();
@@ -261,14 +269,14 @@ fn get_response_summary(r: &ProxyRequest) -> (String, String) {
     };
 
     let Some(index) = last_index else {
-        return (String::new(), String::new());
+        return String::new();
     };
 
     let btype = block_types.get(&index).map(|s| s.as_str()).unwrap_or("");
     let name = block_names.get(&index).map(|s| s.as_str()).unwrap_or("");
     let text = block_text.get(&index).map(|s| s.as_str()).unwrap_or("");
 
-    let summary = match btype {
+    match btype {
         "tool_use" => {
             let preview = text.replace('\n', " ");
             if !name.is_empty() && !preview.is_empty() {
@@ -306,8 +314,278 @@ fn get_response_summary(r: &ProxyRequest) -> (String, String) {
                 String::new()
             }
         }
+    }
+}
+
+fn get_response_summary(proxy_request: &ProxyRequest) -> (String, String) {
+    let Some(ref events_json) = proxy_request.response_events_json else {
+        return match proxy_request.response_status {
+            Some(status) => (String::new(), format!("{}", status)),
+            None => (String::new(), String::new()),
+        };
+    };
+    let Ok(sse_events) = serde_json::from_str::<Vec<serde_json::Value>>(events_json) else {
+        return (String::new(), String::new());
     };
 
+    let (block_types, block_names, block_text) = accumulate_sse_block_metadata(&sse_events);
+
+    let num_blocks = block_types.len();
+    if num_blocks == 0 {
+        return (String::new(), String::new());
+    }
+
+    let summary = format_last_block_summary(&block_types, &block_names, &block_text);
     let count = format!("{}", num_blocks);
     (count, summary)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- extract_block_preview tests ---
+
+    #[test]
+    fn extract_block_preview_text() {
+        let block = serde_json::json!({"type": "text", "text": "Hello world"});
+        assert_eq!(extract_block_preview(&block), "Hello world");
+    }
+
+    #[test]
+    fn extract_block_preview_tool_use() {
+        let block = serde_json::json!({"type": "tool_use", "name": "WebFetch"});
+        assert_eq!(extract_block_preview(&block), "tool_use: WebFetch");
+    }
+
+    #[test]
+    fn extract_block_preview_tool_result_string_content() {
+        let block = serde_json::json!({"type": "tool_result", "content": "Result text"});
+        assert_eq!(extract_block_preview(&block), "tool_result: Result text");
+    }
+
+    #[test]
+    fn extract_block_preview_tool_result_array_content() {
+        let block = serde_json::json!({
+            "type": "tool_result",
+            "content": [
+                {"type": "text", "text": "first"},
+                {"type": "text", "text": "second"},
+            ]
+        });
+        assert_eq!(extract_block_preview(&block), "tool_result: first second");
+    }
+
+    #[test]
+    fn extract_block_preview_tool_result_empty_content() {
+        let block = serde_json::json!({"type": "tool_result"});
+        assert_eq!(extract_block_preview(&block), "tool_result");
+    }
+
+    #[test]
+    fn extract_block_preview_tool_result_truncated() {
+        let long_text = "a".repeat(100);
+        let block = serde_json::json!({"type": "tool_result", "content": long_text});
+        let result = extract_block_preview(&block);
+        assert!(result.starts_with("tool_result: "));
+        assert!(result.ends_with("..."));
+    }
+
+    #[test]
+    fn extract_block_preview_unknown_type() {
+        let block = serde_json::json!({"type": "image"});
+        assert_eq!(extract_block_preview(&block), "image");
+    }
+
+    #[test]
+    fn extract_block_preview_no_type() {
+        let block = serde_json::json!({"text": "hello"});
+        assert_eq!(extract_block_preview(&block), "");
+    }
+
+    // --- accumulate_sse_block_metadata tests ---
+
+    #[test]
+    fn accumulate_sse_block_metadata_empty() {
+        let events: Vec<serde_json::Value> = vec![];
+        let (types, names, text) = accumulate_sse_block_metadata(&events);
+        assert!(types.is_empty());
+        assert!(names.is_empty());
+        assert!(text.is_empty());
+    }
+
+    #[test]
+    fn accumulate_sse_block_metadata_text_block() {
+        let events = vec![
+            serde_json::json!({
+                "event": "content_block_start",
+                "data": {"index": 0, "content_block": {"type": "text"}}
+            }),
+            serde_json::json!({
+                "event": "content_block_delta",
+                "data": {"index": 0, "delta": {"type": "text_delta", "text": "Hello "}}
+            }),
+            serde_json::json!({
+                "event": "content_block_delta",
+                "data": {"index": 0, "delta": {"type": "text_delta", "text": "World"}}
+            }),
+        ];
+        let (types, names, text) = accumulate_sse_block_metadata(&events);
+        assert_eq!(types.get(&0).unwrap(), "text");
+        assert!(!names.contains_key(&0));
+        assert_eq!(text.get(&0).unwrap(), "Hello World");
+    }
+
+    #[test]
+    fn accumulate_sse_block_metadata_tool_use_block() {
+        let events = vec![
+            serde_json::json!({
+                "event": "content_block_start",
+                "data": {"index": 1, "content_block": {"type": "tool_use", "name": "WebFetch"}}
+            }),
+            serde_json::json!({
+                "event": "content_block_delta",
+                "data": {"index": 1, "delta": {"type": "input_json_delta", "partial_json": "{\"url\":"}}
+            }),
+            serde_json::json!({
+                "event": "content_block_delta",
+                "data": {"index": 1, "delta": {"type": "input_json_delta", "partial_json": " \"test\"}"}}
+            }),
+        ];
+        let (types, names, text) = accumulate_sse_block_metadata(&events);
+        assert_eq!(types.get(&1).unwrap(), "tool_use");
+        assert_eq!(names.get(&1).unwrap(), "WebFetch");
+        assert_eq!(text.get(&1).unwrap(), "{\"url\": \"test\"}");
+    }
+
+    #[test]
+    fn accumulate_sse_block_metadata_multiple_blocks() {
+        let events = vec![
+            serde_json::json!({
+                "event": "content_block_start",
+                "data": {"index": 0, "content_block": {"type": "thinking"}}
+            }),
+            serde_json::json!({
+                "event": "content_block_delta",
+                "data": {"index": 0, "delta": {"type": "thinking_delta", "thinking": "hmm"}}
+            }),
+            serde_json::json!({
+                "event": "content_block_start",
+                "data": {"index": 1, "content_block": {"type": "text"}}
+            }),
+            serde_json::json!({
+                "event": "content_block_delta",
+                "data": {"index": 1, "delta": {"type": "text_delta", "text": "result"}}
+            }),
+        ];
+        let (types, _names, text) = accumulate_sse_block_metadata(&events);
+        assert_eq!(types.len(), 2);
+        assert_eq!(types.get(&0).unwrap(), "thinking");
+        assert_eq!(types.get(&1).unwrap(), "text");
+        assert_eq!(text.get(&0).unwrap(), "hmm");
+        assert_eq!(text.get(&1).unwrap(), "result");
+    }
+
+    // --- format_last_block_summary tests ---
+
+    #[test]
+    fn format_last_block_summary_empty_maps() {
+        let types = HashMap::new();
+        let names = HashMap::new();
+        let text = HashMap::new();
+        assert_eq!(format_last_block_summary(&types, &names, &text), "");
+    }
+
+    #[test]
+    fn format_last_block_summary_text_block() {
+        let mut types = HashMap::new();
+        let names = HashMap::new();
+        let mut text = HashMap::new();
+        types.insert(0, "text".to_string());
+        text.insert(0, "Hello world".to_string());
+        assert_eq!(
+            format_last_block_summary(&types, &names, &text),
+            "Hello world"
+        );
+    }
+
+    #[test]
+    fn format_last_block_summary_text_truncated() {
+        let mut types = HashMap::new();
+        let names = HashMap::new();
+        let mut text = HashMap::new();
+        types.insert(0, "text".to_string());
+        text.insert(0, "a".repeat(100));
+        let result = format_last_block_summary(&types, &names, &text);
+        assert!(result.ends_with("..."));
+    }
+
+    #[test]
+    fn format_last_block_summary_tool_use_with_name() {
+        let mut types = HashMap::new();
+        let mut names = HashMap::new();
+        let mut text = HashMap::new();
+        types.insert(0, "tool_use".to_string());
+        names.insert(0, "WebFetch".to_string());
+        text.insert(0, "{\"url\": \"test\"}".to_string());
+        let result = format_last_block_summary(&types, &names, &text);
+        assert!(result.starts_with("tool_use(WebFetch): "));
+    }
+
+    #[test]
+    fn format_last_block_summary_tool_use_name_only() {
+        let mut types = HashMap::new();
+        let mut names = HashMap::new();
+        let text = HashMap::new();
+        types.insert(0, "tool_use".to_string());
+        names.insert(0, "WebSearch".to_string());
+        assert_eq!(
+            format_last_block_summary(&types, &names, &text),
+            "tool_use(WebSearch)"
+        );
+    }
+
+    #[test]
+    fn format_last_block_summary_tool_use_no_name() {
+        let mut types = HashMap::new();
+        let names = HashMap::new();
+        let text = HashMap::new();
+        types.insert(0, "tool_use".to_string());
+        assert_eq!(format_last_block_summary(&types, &names, &text), "tool_use");
+    }
+
+    #[test]
+    fn format_last_block_summary_thinking() {
+        let mut types = HashMap::new();
+        let names = HashMap::new();
+        let mut text = HashMap::new();
+        types.insert(0, "thinking".to_string());
+        text.insert(0, "Let me think".to_string());
+        assert_eq!(
+            format_last_block_summary(&types, &names, &text),
+            "thinking: Let me think"
+        );
+    }
+
+    #[test]
+    fn format_last_block_summary_thinking_empty() {
+        let mut types = HashMap::new();
+        let names = HashMap::new();
+        let text = HashMap::new();
+        types.insert(0, "thinking".to_string());
+        assert_eq!(format_last_block_summary(&types, &names, &text), "thinking");
+    }
+
+    #[test]
+    fn format_last_block_summary_uses_highest_index() {
+        let mut types = HashMap::new();
+        let names = HashMap::new();
+        let mut text = HashMap::new();
+        types.insert(0, "thinking".to_string());
+        text.insert(0, "thought".to_string());
+        types.insert(1, "text".to_string());
+        text.insert(1, "output".to_string());
+        // Should use index 1 (highest)
+        assert_eq!(format_last_block_summary(&types, &names, &text), "output");
+    }
 }

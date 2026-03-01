@@ -4,17 +4,20 @@ use templates::{Breadcrumb, NavLink, Page};
 
 pub fn render_webfetch_view(session: &Session) -> String {
     let session_id = session.id.to_string();
-    let wf_enable_action = format!("/_dashboard/sessions/{}/intercept/webfetch", session_id);
+    let wf_enable_action = format!(
+        "/_dashboard/sessions/{}/tool-intercept/webfetch",
+        session_id
+    );
     let wf_disable_action = format!(
-        "/_dashboard/sessions/{}/intercept/webfetch/clear",
+        "/_dashboard/sessions/{}/tool-intercept/webfetch/clear",
         session_id
     );
     let whitelist_save_action = format!(
-        "/_dashboard/sessions/{}/intercept/webfetch/whitelist",
+        "/_dashboard/sessions/{}/tool-intercept/webfetch/whitelist",
         session_id
     );
     let whitelist_clear_action = format!(
-        "/_dashboard/sessions/{}/intercept/webfetch/whitelist/clear",
+        "/_dashboard/sessions/{}/tool-intercept/webfetch/whitelist/clear",
         session_id
     );
 
@@ -89,8 +92,8 @@ pub fn render_webfetch_view(session: &Session) -> String {
                 format!("/_dashboard/sessions/{}", session_id),
             ),
             Breadcrumb::link(
-                "Intercept",
-                format!("/_dashboard/sessions/{}/intercept", session_id),
+                "Tool Intercept",
+                format!("/_dashboard/sessions/{}/tool-intercept", session_id),
             ),
             Breadcrumb::current("WebFetch Intercept"),
         ],
@@ -115,15 +118,15 @@ pub fn render_approvals_view(
             let session_id = session_id.clone();
             tools.iter().map(move |tool| {
                 let fail_action = format!(
-                    "/_dashboard/sessions/{}/intercept/approvals/fail/{}",
+                    "/_dashboard/sessions/{}/tool-intercept/approvals/fail/{}",
                     session_id, approval_id
                 );
                 let mock_action = format!(
-                    "/_dashboard/sessions/{}/intercept/approvals/mock/{}",
+                    "/_dashboard/sessions/{}/tool-intercept/approvals/mock/{}",
                     session_id, approval_id
                 );
                 let accept_action = format!(
-                    "/_dashboard/sessions/{}/intercept/approvals/accept/{}",
+                    "/_dashboard/sessions/{}/tool-intercept/approvals/accept/{}",
                     session_id, approval_id
                 );
                 let name = tool.name.clone();
@@ -187,8 +190,8 @@ pub fn render_approvals_view(
                 format!("/_dashboard/sessions/{}", session_id),
             ),
             Breadcrumb::link(
-                "Intercept",
-                format!("/_dashboard/sessions/{}/intercept", session_id),
+                "Tool Intercept",
+                format!("/_dashboard/sessions/{}/tool-intercept", session_id),
             ),
             Breadcrumb::current("Pending Approvals"),
         ],
