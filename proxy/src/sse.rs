@@ -51,6 +51,22 @@ pub fn parse_sse_events(body: &str) -> Vec<serde_json::Value> {
     events
 }
 
+/// Extract all text from `text_delta` events in a parsed SSE event list.
+/// Returns the concatenated text content from the response.
+pub fn extract_text_from_events(events: &[serde_json::Value]) -> String {
+    let mut text = String::new();
+    for event in events {
+        if let Some(delta) = event.get("data").and_then(|d| d.get("delta")) {
+            if delta.get("type").and_then(|v| v.as_str()) == Some("text_delta") {
+                if let Some(t) = delta.get("text").and_then(|v| v.as_str()) {
+                    text.push_str(t);
+                }
+            }
+        }
+    }
+    text
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

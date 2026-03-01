@@ -38,20 +38,7 @@ pub const ERROR_TYPES: &[ErrorType] = &[
     },
 ];
 
-/// Look up the data JSON for a known error type key, or `None` if unknown.
-pub fn data_json_for_key(key: &str) -> Option<&'static str> {
-    ERROR_TYPES
-        .iter()
-        .find(|e| e.key == key)
-        .map(|e| e.data_json)
-}
-
-/// Look up the HTTP status code for a known error type key, or `None` if unknown.
-pub fn status_for_key(key: &str) -> Option<u16> {
-    ERROR_TYPES.iter().find(|e| e.key == key).map(|e| e.status)
-}
-
-/// Look up the human-readable label for a known error type key, or `None` if unknown.
-pub fn label_for_key(key: &str) -> Option<&'static str> {
-    ERROR_TYPES.iter().find(|e| e.key == key).map(|e| e.label)
+/// Look up a known error type by its key, or `None` if unknown.
+pub fn find_by_key(key: &str) -> Option<&'static ErrorType> {
+    ERROR_TYPES.iter().find(|e| e.key == key)
 }

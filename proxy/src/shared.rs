@@ -36,7 +36,9 @@ pub async fn load_filters_for_profile(
         .into_iter()
         .map(|f| f.name)
         .collect();
-    let keep_tool_pairs = db::get_keep_tool_pairs(pool, profile_id).await.unwrap_or(0);
+    let keep_tool_pairs = db::get_filter_profile_keep_tool_pairs(pool, profile_id)
+        .await
+        .unwrap_or(0);
     Some(ActiveFilters {
         system_filters,
         tool_filters,
@@ -148,9 +150,9 @@ pub async fn log_request(
     meta: &RequestMeta<'_>,
     fields: &ParsedRequestBody,
 ) -> anyhow::Result<String> {
-    db::insert_request(
+    db::create_request(
         meta.pool,
-        &db::InsertRequestParams {
+        &db::CreateRequestParams {
             session_id: meta.session_id,
             method: meta.method,
             path: meta.path,
@@ -180,7 +182,7 @@ pub async fn store_response(
     let events = sse::parse_sse_events(response_body);
     let events_json = serde_json::to_string(&events)?;
 
-    db::update_request_response(
+    db::set_request_response(
         pool,
         request_id,
         status as i64,
@@ -192,26 +194,15 @@ pub async fn store_response(
     Ok(())
 }
 
-/// Return the SSE data JSON for a known error type key, or `None` if unknown.
-pub fn error_inject_data_json(error_type: &str) -> Option<&'static str> {
-    common::error_inject::data_json_for_key(error_type)
-}
-
-/// Return the HTTP status code for a known error type key, or `None` if unknown.
-pub fn error_inject_status(error_type: &str) -> Option<u16> {
-    common::error_inject::status_for_key(error_type)
-}
-
 /// Build an error injection response with the correct HTTP status code and JSON body.
 /// Returns `Some(HttpResponse)` if the key is a known error type, `None` otherwise.
 pub fn build_injected_sse_error(error_type: &str) -> Option<HttpResponse> {
-    let data_json = error_inject_data_json(error_type)?;
-    let status = error_inject_status(error_type)?;
-    let actix_status = StatusCode::from_u16(status).ok()?;
+    let e = common::error_inject::find_by_key(error_type)?;
+    let actix_status = StatusCode::from_u16(e.status).ok()?;
     Some(
         HttpResponse::build(actix_status)
             .insert_header((actix_web::http::header::CONTENT_TYPE, "application/json"))
-            .body(data_json),
+            .body(e.data_json),
     )
 }
 

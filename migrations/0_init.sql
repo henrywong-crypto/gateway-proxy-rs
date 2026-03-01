@@ -5,6 +5,11 @@ CREATE TABLE IF NOT EXISTS sessions (
     tls_verify_disabled INTEGER NOT NULL DEFAULT 0,
     auth_header TEXT,
     x_api_key TEXT,
+    profile_id TEXT REFERENCES filter_profiles(id),
+    error_inject TEXT,
+    webfetch_intercept INTEGER NOT NULL DEFAULT 0,
+    webfetch_whitelist TEXT,
+    webfetch_tool_names TEXT NOT NULL DEFAULT 'WebFetch',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -27,12 +32,17 @@ CREATE TABLE IF NOT EXISTS requests (
     response_headers_json TEXT,
     response_body TEXT,
     response_events_json TEXT,
+    webfetch_first_response_body TEXT,
+    webfetch_first_response_events_json TEXT,
+    webfetch_followup_body_json TEXT,
+    webfetch_rounds_json TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS filter_profiles (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
+    is_default INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 

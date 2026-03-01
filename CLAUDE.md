@@ -65,6 +65,48 @@ use crate::pages;
 use crate::Args;
 ```
 
+### Function Naming
+
+Start every function name with a verb. The nouns in the name must match the type being returned or acted on.
+
+```rust
+// Good — verb first, noun matches return type
+fn get_animal(id: &str) -> Option<Animal>;
+fn list_wild_animals(region: &str) -> Vec<WildAnimal>;
+fn count_animals() -> i64;
+fn create_animal(params: &AnimalParams) -> Animal;
+fn update_animal(id: &str, params: &AnimalParams) -> Result<()>;
+fn delete_animal(id: &str) -> Result<()>;
+fn clear_animals() -> Result<()>;
+
+// Good — single-field setter names the entity and field
+fn set_animal_name(id: &str, name: &str) -> Result<()>;
+fn set_cage_temperature(id: &str, temp: f64) -> Result<()>;
+
+// Good — transform / produce / convert
+fn build_feed_schedule(animals: &[Animal]) -> FeedSchedule;
+fn parse_tag_number(raw: &str) -> Option<TagNumber>;
+fn validate_cage_size(cage: &Cage) -> Result<(), CageError>;
+fn encode_payload(data: &Payload) -> Vec<u8>;
+fn decode_payload(raw: &[u8]) -> Result<Payload>;
+fn extract_metadata(raw: &[u8]) -> Metadata;
+fn compute_feed_cost(schedule: &FeedSchedule) -> f64;
+fn format_animal_report(animal: &Animal) -> String;
+fn render_animals_view(animals: &[Animal]) -> String;
+fn render_new_animal_form(species: &[Species]) -> String;
+
+// Bad — noun doesn't match return type
+fn list_animals() -> Vec<WildAnimal>;  // returns WildAnimal, not Animal
+fn get_cage(id: &str) -> Option<CageStatus>;  // returns CageStatus, not Cage
+
+// Bad — missing verb
+fn animals(region: &str) -> Vec<Animal>;
+fn animal_name(id: &str) -> String;
+
+// Bad — ambiguous setter (which field?)
+fn set_animal(id: &str, name: &str) -> Result<()>;  // use set_animal_name
+```
+
 ### Versioning
 
 All crate versions use 3-part semver (e.g. `0.1.0`).

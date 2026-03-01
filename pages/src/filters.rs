@@ -1,8 +1,11 @@
-use common::models::{FilterProfile, SystemFilter, ToolFilter};
+use common::models::{
+    FilterProfile, SystemFilter, ToolFilter, DEFAULT_SYSTEM_FILTER_SUGGESTIONS,
+    DEFAULT_TOOL_FILTER_SUGGESTIONS,
+};
 use leptos::{either::Either, prelude::*};
 use templates::{Breadcrumb, InfoRow, NavLink, Page, Subpage};
 
-pub fn render_filters_index(profiles: &[FilterProfile]) -> String {
+pub fn render_filters_view(profiles: &[FilterProfile]) -> String {
     let profiles = profiles.to_vec();
     let empty = profiles.is_empty();
     let total = profiles.len();
@@ -74,7 +77,7 @@ pub fn render_filters_index(profiles: &[FilterProfile]) -> String {
     .render()
 }
 
-pub fn render_new_profile() -> String {
+pub fn render_new_profile_form() -> String {
     let form = view! {
         <h2>"New Profile"</h2>
         <form method="POST" action="/_dashboard/filters/new">
@@ -106,7 +109,7 @@ pub fn render_new_profile() -> String {
     .render()
 }
 
-pub fn render_profile_show(
+pub fn render_profile_view(
     profile: &FilterProfile,
     system_count: i64,
     tool_count: i64,
@@ -162,7 +165,7 @@ pub fn render_profile_show(
     .render()
 }
 
-pub fn render_profile_edit(profile: &FilterProfile) -> String {
+pub fn render_edit_profile_form(profile: &FilterProfile) -> String {
     let profile = profile.clone();
     let profile_name = profile.name.clone();
     let profile_id = profile.id.to_string();
@@ -203,7 +206,10 @@ pub fn render_profile_edit(profile: &FilterProfile) -> String {
     .render()
 }
 
-pub fn render_profile_system(profile: &FilterProfile, system_filters: &[SystemFilter]) -> String {
+pub fn render_system_filters_view(
+    profile: &FilterProfile,
+    system_filters: &[SystemFilter],
+) -> String {
     let profile_name = profile.name.clone();
     let profile_id = profile.id.to_string();
     let system_filters = system_filters.to_vec();
@@ -275,7 +281,7 @@ pub fn render_profile_system(profile: &FilterProfile, system_filters: &[SystemFi
     .render()
 }
 
-pub fn render_profile_system_new(
+pub fn render_new_system_filter_form(
     profile: &FilterProfile,
     system_filters: &[SystemFilter],
 ) -> String {
@@ -284,7 +290,7 @@ pub fn render_profile_system_new(
     let form_action = format!("/_dashboard/filters/{}/system", profile_id);
 
     let existing_patterns: Vec<String> = system_filters.iter().map(|f| f.pattern.clone()).collect();
-    let system_suggestions: Vec<&&str> = db::DEFAULT_FILTER_SUGGESTIONS
+    let system_suggestions: Vec<&&str> = DEFAULT_SYSTEM_FILTER_SUGGESTIONS
         .iter()
         .filter(|s| !existing_patterns.contains(&s.to_string()))
         .collect();
@@ -352,7 +358,7 @@ pub fn render_profile_system_new(
     .render()
 }
 
-pub fn render_profile_tools(profile: &FilterProfile, tool_filters: &[ToolFilter]) -> String {
+pub fn render_tool_filters_view(profile: &FilterProfile, tool_filters: &[ToolFilter]) -> String {
     let profile_name = profile.name.clone();
     let profile_id = profile.id.to_string();
     let tool_filters = tool_filters.to_vec();
@@ -424,13 +430,13 @@ pub fn render_profile_tools(profile: &FilterProfile, tool_filters: &[ToolFilter]
     .render()
 }
 
-pub fn render_profile_tools_new(profile: &FilterProfile, tool_filters: &[ToolFilter]) -> String {
+pub fn render_new_tool_filter_form(profile: &FilterProfile, tool_filters: &[ToolFilter]) -> String {
     let profile_name = profile.name.clone();
     let profile_id = profile.id.to_string();
     let form_action = format!("/_dashboard/filters/{}/tools", profile_id);
 
     let existing_names: Vec<String> = tool_filters.iter().map(|f| f.name.clone()).collect();
-    let tool_suggestions: Vec<&&str> = db::DEFAULT_TOOL_FILTER_SUGGESTIONS
+    let tool_suggestions: Vec<&&str> = DEFAULT_TOOL_FILTER_SUGGESTIONS
         .iter()
         .filter(|s| !existing_names.contains(&s.to_string()))
         .collect();
@@ -498,7 +504,7 @@ pub fn render_profile_tools_new(profile: &FilterProfile, tool_filters: &[ToolFil
     .render()
 }
 
-pub fn render_system_filter_edit(profile: &FilterProfile, filter: &SystemFilter) -> String {
+pub fn render_edit_system_filter_form(profile: &FilterProfile, filter: &SystemFilter) -> String {
     let profile_name = profile.name.clone();
     let profile_id = profile.id.to_string();
     let filter_id = filter.id.to_string();
@@ -546,7 +552,7 @@ pub fn render_system_filter_edit(profile: &FilterProfile, filter: &SystemFilter)
     .render()
 }
 
-pub fn render_tool_filter_edit(profile: &FilterProfile, filter: &ToolFilter) -> String {
+pub fn render_edit_tool_filter_form(profile: &FilterProfile, filter: &ToolFilter) -> String {
     let profile_name = profile.name.clone();
     let profile_id = profile.id.to_string();
     let filter_id = filter.id.to_string();
@@ -594,7 +600,7 @@ pub fn render_tool_filter_edit(profile: &FilterProfile, filter: &ToolFilter) -> 
     .render()
 }
 
-pub fn render_profile_messages(profile: &FilterProfile, keep_tool_pairs: i64) -> String {
+pub fn render_message_filters_view(profile: &FilterProfile, keep_tool_pairs: i64) -> String {
     let profile_name = profile.name.clone();
     let profile_id = profile.id.to_string();
     let form_action = format!("/_dashboard/filters/{}/messages", profile_id);

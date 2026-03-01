@@ -1,0 +1,11 @@
+[package]
+name = "pages"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+common = { path = "../common" }
+templates = { path = "../templates" }
+leptos = { version = "0.8", features = ["ssr"] }
+serde_json = "1"
+regex = "1"

@@ -1,24 +1,29 @@
 use common::models::{FilterProfile, SystemFilter, ToolFilter};
 use sqlx::sqlite::SqlitePool;
 
+const PROFILE_COLUMNS: &str = "id, name, is_default, created_at";
+const SYSTEM_FILTER_COLUMNS: &str = "id, profile_id, pattern, created_at";
+const TOOL_FILTER_COLUMNS: &str = "id, profile_id, name, created_at";
+
 // -- Filter Profiles --
 
-pub async fn count_profiles(pool: &SqlitePool) -> anyhow::Result<i64> {
+pub async fn count_filter_profiles(pool: &SqlitePool) -> anyhow::Result<i64> {
     let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM filter_profiles")
         .fetch_one(pool)
         .await?;
     Ok(row.0)
 }
 
-pub async fn list_profiles(pool: &SqlitePool) -> anyhow::Result<Vec<FilterProfile>> {
-    Ok(sqlx::query_as::<_, FilterProfile>(
-        "SELECT id, name, is_default, created_at FROM filter_profiles ORDER BY created_at ASC",
-    )
+pub async fn list_filter_profiles(pool: &SqlitePool) -> anyhow::Result<Vec<FilterProfile>> {
+    Ok(sqlx::query_as::<_, FilterProfile>(&format!(
+        "SELECT {} FROM filter_profiles ORDER BY created_at ASC",
+        PROFILE_COLUMNS
+    ))
     .fetch_all(pool)
     .await?)
 }
 
-pub async fn create_profile(pool: &SqlitePool, name: &str) -> anyhow::Result<uuid::Uuid> {
+pub async fn create_filter_profile(pool: &SqlitePool, name: &str) -> anyhow::Result<uuid::Uuid> {
     let id = uuid::Uuid::new_v4();
     sqlx::query("INSERT INTO filter_profiles (id, name) VALUES (?, ?)")
         .bind(id.to_string())
@@ -28,7 +33,7 @@ pub async fn create_profile(pool: &SqlitePool, name: &str) -> anyhow::Result<uui
     Ok(id)
 }
 
-pub async fn delete_profile(pool: &SqlitePool, id: &str) -> anyhow::Result<()> {
+pub async fn delete_filter_profile(pool: &SqlitePool, id: &str) -> anyhow::Result<()> {
     sqlx::query("DELETE FROM filter_profiles WHERE id = ?")
         .bind(id)
         .execute(pool)
@@ -36,7 +41,11 @@ pub async fn delete_profile(pool: &SqlitePool, id: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn rename_profile(pool: &SqlitePool, id: &str, name: &str) -> anyhow::Result<()> {
+pub async fn set_filter_profile_name(
+    pool: &SqlitePool,
+    id: &str,
+    name: &str,
+) -> anyhow::Result<()> {
     sqlx::query("UPDATE filter_profiles SET name = ? WHERE id = ?")
         .bind(name)
         .bind(id)
@@ -45,28 +54,33 @@ pub async fn rename_profile(pool: &SqlitePool, id: &str, name: &str) -> anyhow::
     Ok(())
 }
 
-pub async fn get_profile(pool: &SqlitePool, id: &str) -> anyhow::Result<Option<FilterProfile>> {
-    Ok(sqlx::query_as::<_, FilterProfile>(
-        "SELECT id, name, is_default, created_at FROM filter_profiles WHERE id = ?",
-    )
+pub async fn get_filter_profile(
+    pool: &SqlitePool,
+    id: &str,
+) -> anyhow::Result<Option<FilterProfile>> {
+    Ok(sqlx::query_as::<_, FilterProfile>(&format!(
+        "SELECT {} FROM filter_profiles WHERE id = ?",
+        PROFILE_COLUMNS
+    ))
     .bind(id)
     .fetch_optional(pool)
     .await?)
 }
 
-pub async fn get_profile_by_name(
+pub async fn get_filter_profile_by_name(
     pool: &SqlitePool,
     name: &str,
 ) -> anyhow::Result<Option<FilterProfile>> {
-    Ok(sqlx::query_as::<_, FilterProfile>(
-        "SELECT id, name, is_default, created_at FROM filter_profiles WHERE name = ?",
-    )
+    Ok(sqlx::query_as::<_, FilterProfile>(&format!(
+        "SELECT {} FROM filter_profiles WHERE name = ?",
+        PROFILE_COLUMNS
+    ))
     .bind(name)
     .fetch_optional(pool)
     .await?)
 }
 
-pub async fn get_default_profile_id(pool: &SqlitePool) -> anyhow::Result<String> {
+pub async fn get_default_filter_profile_id(pool: &SqlitePool) -> anyhow::Result<String> {
     let row: Option<(String,)> =
         sqlx::query_as("SELECT id FROM filter_profiles WHERE is_default = 1 LIMIT 1")
             .fetch_optional(pool)
@@ -112,8 +126,8 @@ pub async fn set_setting(pool: &SqlitePool, key: &str, value: &str) -> anyhow::R
 }
 
 /// Ensure a "default" profile with is_default=1 exists.
-pub async fn ensure_default_profile(pool: &SqlitePool) -> anyhow::Result<()> {
-    let profiles = list_profiles(pool).await?;
+pub async fn ensure_default_filter_profile(pool: &SqlitePool) -> anyhow::Result<()> {
+    let profiles = list_filter_profiles(pool).await?;
 
     let has_default = profiles.iter().any(|p| p.is_default);
 
@@ -142,15 +156,16 @@ pub async fn list_system_filters(
     pool: &SqlitePool,
     profile_id: &str,
 ) -> anyhow::Result<Vec<SystemFilter>> {
-    Ok(sqlx::query_as::<_, SystemFilter>(
-        "SELECT id, profile_id, pattern, created_at FROM system_filters WHERE profile_id = ? ORDER BY created_at DESC",
-    )
+    Ok(sqlx::query_as::<_, SystemFilter>(&format!(
+        "SELECT {} FROM system_filters WHERE profile_id = ? ORDER BY created_at DESC",
+        SYSTEM_FILTER_COLUMNS
+    ))
     .bind(profile_id)
     .fetch_all(pool)
     .await?)
 }
 
-pub async fn add_system_filter(
+pub async fn create_system_filter(
     pool: &SqlitePool,
     profile_id: &str,
     pattern: &str,
@@ -186,18 +201,16 @@ pub async fn update_system_filter(
     Ok(())
 }
 
-pub const DEFAULT_FILTER_SUGGESTIONS: &[&str] = &[
-    "^x-anthropic-billing-header: cc_version=",
-    "^You are Claude Code, Anthropic's official CLI for Claude.$",
-];
+pub use common::models::DEFAULT_SYSTEM_FILTER_SUGGESTIONS as DEFAULT_FILTER_SUGGESTIONS;
 
 pub async fn get_system_filter(
     pool: &SqlitePool,
     id: &str,
 ) -> anyhow::Result<Option<SystemFilter>> {
-    Ok(sqlx::query_as::<_, SystemFilter>(
-        "SELECT id, profile_id, pattern, created_at FROM system_filters WHERE id = ?",
-    )
+    Ok(sqlx::query_as::<_, SystemFilter>(&format!(
+        "SELECT {} FROM system_filters WHERE id = ?",
+        SYSTEM_FILTER_COLUMNS
+    ))
     .bind(id)
     .fetch_optional(pool)
     .await?)
@@ -209,24 +222,26 @@ pub async fn list_tool_filters(
     pool: &SqlitePool,
     profile_id: &str,
 ) -> anyhow::Result<Vec<ToolFilter>> {
-    Ok(sqlx::query_as::<_, ToolFilter>(
-        "SELECT id, profile_id, name, created_at FROM tool_filters WHERE profile_id = ? ORDER BY created_at DESC",
-    )
+    Ok(sqlx::query_as::<_, ToolFilter>(&format!(
+        "SELECT {} FROM tool_filters WHERE profile_id = ? ORDER BY created_at DESC",
+        TOOL_FILTER_COLUMNS
+    ))
     .bind(profile_id)
     .fetch_all(pool)
     .await?)
 }
 
 pub async fn get_tool_filter(pool: &SqlitePool, id: &str) -> anyhow::Result<Option<ToolFilter>> {
-    Ok(sqlx::query_as::<_, ToolFilter>(
-        "SELECT id, profile_id, name, created_at FROM tool_filters WHERE id = ?",
-    )
+    Ok(sqlx::query_as::<_, ToolFilter>(&format!(
+        "SELECT {} FROM tool_filters WHERE id = ?",
+        TOOL_FILTER_COLUMNS
+    ))
     .bind(id)
     .fetch_optional(pool)
     .await?)
 }
 
-pub async fn add_tool_filter(
+pub async fn create_tool_filter(
     pool: &SqlitePool,
     profile_id: &str,
     name: &str,
@@ -258,11 +273,14 @@ pub async fn update_tool_filter(pool: &SqlitePool, id: &str, name: &str) -> anyh
     Ok(())
 }
 
-pub const DEFAULT_TOOL_FILTER_SUGGESTIONS: &[&str] = &["WebSearch"];
+pub use common::models::DEFAULT_TOOL_FILTER_SUGGESTIONS;
 
 // -- Message Filters --
 
-pub async fn get_keep_tool_pairs(pool: &SqlitePool, profile_id: &str) -> anyhow::Result<i64> {
+pub async fn get_filter_profile_keep_tool_pairs(
+    pool: &SqlitePool,
+    profile_id: &str,
+) -> anyhow::Result<i64> {
     let row: Option<(i64,)> =
         sqlx::query_as("SELECT keep_tool_pairs FROM message_filters WHERE profile_id = ?")
             .bind(profile_id)
@@ -271,7 +289,7 @@ pub async fn get_keep_tool_pairs(pool: &SqlitePool, profile_id: &str) -> anyhow:
     Ok(row.map(|r| r.0).unwrap_or(0))
 }
 
-pub async fn set_message_filter(
+pub async fn set_filter_profile_message_filter(
     pool: &SqlitePool,
     profile_id: &str,
     keep_tool_pairs: i64,

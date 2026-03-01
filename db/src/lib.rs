@@ -19,7 +19,7 @@ pub async fn init_pool(db_path: &str) -> anyhow::Result<SqlitePool> {
 
     sqlx::migrate!("../migrations").run(&pool).await?;
 
-    ensure_default_profile(&pool).await?;
+    ensure_default_filter_profile(&pool).await?;
 
     Ok(pool)
 }

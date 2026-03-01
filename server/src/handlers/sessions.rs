@@ -1,38 +1,57 @@
 use actix_web::{web, HttpResponse};
-use proxy::websearch::{ApprovalDecision, ApprovalQueue};
 use sqlx::SqlitePool;
 use std::collections::HashMap;
+use templates::Pagination;
 use uuid::Uuid;
 
-use crate::{pages, Args};
+use crate::Args;
 
-pub async fn home_page(pool: web::Data<SqlitePool>) -> HttpResponse {
+pub async fn show_home_page(pool: web::Data<SqlitePool>) -> HttpResponse {
     let session_count = db::count_sessions(pool.get_ref()).await.unwrap_or(0);
-    let profile_count = db::count_profiles(pool.get_ref()).await.unwrap_or(0);
-    let html = pages::home::render_home(session_count, profile_count);
+    let profile_count = db::count_filter_profiles(pool.get_ref()).await.unwrap_or(0);
+    let html = pages::home::render_home_view(session_count, profile_count);
     HttpResponse::Ok().content_type("text/html").body(html)
 }
 
-pub async fn sessions_index(pool: web::Data<SqlitePool>) -> HttpResponse {
-    match db::list_sessions(pool.get_ref()).await {
-        Ok(sessions) => {
-            let html = pages::sessions::render_sessions_index(&sessions);
-            HttpResponse::Ok().content_type("text/html").body(html)
-        }
-        Err(e) => HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
-    }
+pub async fn show_sessions_page(
+    pool: web::Data<SqlitePool>,
+    query: web::Query<HashMap<String, String>>,
+) -> HttpResponse {
+    let page: i64 = query
+        .get("page")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1)
+        .max(1);
+    let per_page: i64 = 50;
+
+    let total = match db::count_sessions(pool.get_ref()).await {
+        Ok(n) => n,
+        Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
+    };
+
+    let offset = (page - 1) * per_page;
+    let sessions = match db::list_sessions_paginated(pool.get_ref(), per_page, offset).await {
+        Ok(s) => s,
+        Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
+    };
+
+    let pagination = Pagination::new(page, total, per_page, "/_dashboard/sessions", "");
+    let html = pages::sessions::render_sessions_view(&sessions, &pagination);
+    HttpResponse::Ok().content_type("text/html").body(html)
 }
 
-pub async fn new_session(pool: web::Data<SqlitePool>) -> HttpResponse {
-    let profiles = db::list_profiles(pool.get_ref()).await.unwrap_or_default();
-    let default_profile_id = db::get_default_profile_id(pool.get_ref())
+pub async fn show_new_session_form(pool: web::Data<SqlitePool>) -> HttpResponse {
+    let profiles = db::list_filter_profiles(pool.get_ref())
         .await
         .unwrap_or_default();
-    let html = pages::sessions::render_new_session(&profiles, &default_profile_id);
+    let default_profile_id = db::get_default_filter_profile_id(pool.get_ref())
+        .await
+        .unwrap_or_default();
+    let html = pages::sessions::render_new_session_form(&profiles, &default_profile_id);
     HttpResponse::Ok().content_type("text/html").body(html)
 }
 
-pub async fn create_session(
+pub async fn create_session_post(
     pool: web::Data<SqlitePool>,
     form: web::Form<HashMap<String, String>>,
 ) -> HttpResponse {
@@ -89,7 +108,7 @@ pub async fn create_session(
     }
 }
 
-pub async fn session_show(
+pub async fn show_session_page(
     pool: web::Data<SqlitePool>,
     path: web::Path<String>,
     args: web::Data<Args>,
@@ -103,7 +122,7 @@ pub async fn session_show(
     };
 
     let profile_name = if let Some(ref pid) = session.profile_id {
-        match db::get_profile(pool.get_ref(), pid).await {
+        match db::get_filter_profile(pool.get_ref(), pid).await {
             Ok(Some(p)) => Some(p.name),
             _ => None,
         }
@@ -112,11 +131,11 @@ pub async fn session_show(
     };
 
     let html =
-        pages::session_show::render_session_show(&session, args.port, profile_name.as_deref());
+        pages::session_show::render_session_view(&session, args.port, profile_name.as_deref());
     HttpResponse::Ok().content_type("text/html").body(html)
 }
 
-pub async fn edit_session(
+pub async fn show_edit_session_form(
     pool: web::Data<SqlitePool>,
     path: web::Path<String>,
     args: web::Data<Args>,
@@ -129,12 +148,14 @@ pub async fn edit_session(
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
 
-    let profiles = db::list_profiles(pool.get_ref()).await.unwrap_or_default();
-    let html = pages::sessions::render_edit_session(&session, args.port, &profiles);
+    let profiles = db::list_filter_profiles(pool.get_ref())
+        .await
+        .unwrap_or_default();
+    let html = pages::sessions::render_edit_session_form(&session, args.port, &profiles);
     HttpResponse::Ok().content_type("text/html").body(html)
 }
 
-pub async fn update_session(
+pub async fn update_session_post(
     pool: web::Data<SqlitePool>,
     path: web::Path<String>,
     form: web::Form<HashMap<String, String>>,
@@ -191,263 +212,15 @@ pub async fn update_session(
     }
 }
 
-pub async fn delete_session(pool: web::Data<SqlitePool>, path: web::Path<String>) -> HttpResponse {
+pub async fn delete_session_post(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<String>,
+) -> HttpResponse {
     let session_id = path.into_inner();
     if let Err(e) = db::delete_session(pool.get_ref(), &session_id).await {
         return HttpResponse::InternalServerError().body(format!("DB error: {}", e));
     }
     HttpResponse::SeeOther()
         .insert_header(("Location", "/_dashboard/sessions"))
-        .finish()
-}
-
-pub async fn error_inject_show(
-    pool: web::Data<SqlitePool>,
-    path: web::Path<String>,
-) -> HttpResponse {
-    let session_id = path.into_inner();
-    let session = match db::get_session(pool.get_ref(), &session_id).await {
-        Ok(Some(s)) => s,
-        Ok(None) => return HttpResponse::NotFound().body("Session not found"),
-        Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
-    };
-    let html = pages::error_inject::render_error_inject(&session);
-    HttpResponse::Ok().content_type("text/html").body(html)
-}
-
-pub async fn error_inject_set(
-    pool: web::Data<SqlitePool>,
-    path: web::Path<String>,
-    form: web::Form<HashMap<String, String>>,
-) -> HttpResponse {
-    let session_id = path.into_inner();
-    let error_type = form.get("error_type").map(|s| s.as_str()).unwrap_or("");
-    if let Err(e) = db::set_error_inject(pool.get_ref(), &session_id, Some(error_type)).await {
-        return HttpResponse::InternalServerError().body(format!("DB error: {}", e));
-    }
-    HttpResponse::SeeOther()
-        .insert_header((
-            "Location",
-            format!("/_dashboard/sessions/{}/error-inject", session_id),
-        ))
-        .finish()
-}
-
-pub async fn error_inject_clear(
-    pool: web::Data<SqlitePool>,
-    path: web::Path<String>,
-) -> HttpResponse {
-    let session_id = path.into_inner();
-    if let Err(e) = db::set_error_inject(pool.get_ref(), &session_id, None).await {
-        return HttpResponse::InternalServerError().body(format!("DB error: {}", e));
-    }
-    HttpResponse::SeeOther()
-        .insert_header((
-            "Location",
-            format!("/_dashboard/sessions/{}/error-inject", session_id),
-        ))
-        .finish()
-}
-
-pub async fn websearch_show(
-    pool: web::Data<SqlitePool>,
-    path: web::Path<String>,
-    approval_queue: web::Data<ApprovalQueue>,
-) -> HttpResponse {
-    let session_id = path.into_inner();
-    let session = match db::get_session(pool.get_ref(), &session_id).await {
-        Ok(Some(s)) => s,
-        Ok(None) => return HttpResponse::NotFound().body("Session not found"),
-        Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
-    };
-    let pending = proxy::websearch::list_pending(approval_queue.get_ref(), &session_id);
-    let html = pages::websearch::render_websearch(&session, &pending);
-    HttpResponse::Ok().content_type("text/html").body(html)
-}
-
-pub async fn websearch_set(pool: web::Data<SqlitePool>, path: web::Path<String>) -> HttpResponse {
-    let session_id = path.into_inner();
-    if let Err(e) = db::set_websearch_intercept(pool.get_ref(), &session_id, true).await {
-        return HttpResponse::InternalServerError().body(format!("DB error: {}", e));
-    }
-    HttpResponse::SeeOther()
-        .insert_header((
-            "Location",
-            format!("/_dashboard/sessions/{}/websearch", session_id),
-        ))
-        .finish()
-}
-
-pub async fn websearch_clear(pool: web::Data<SqlitePool>, path: web::Path<String>) -> HttpResponse {
-    let session_id = path.into_inner();
-    if let Err(e) = db::set_websearch_intercept(pool.get_ref(), &session_id, false).await {
-        return HttpResponse::InternalServerError().body(format!("DB error: {}", e));
-    }
-    HttpResponse::SeeOther()
-        .insert_header((
-            "Location",
-            format!("/_dashboard/sessions/{}/websearch", session_id),
-        ))
-        .finish()
-}
-
-pub async fn webfetch_set(pool: web::Data<SqlitePool>, path: web::Path<String>) -> HttpResponse {
-    let session_id = path.into_inner();
-    if let Err(e) = db::set_webfetch_intercept(pool.get_ref(), &session_id, true).await {
-        return HttpResponse::InternalServerError().body(format!("DB error: {}", e));
-    }
-    HttpResponse::SeeOther()
-        .insert_header((
-            "Location",
-            format!("/_dashboard/sessions/{}/websearch", session_id),
-        ))
-        .finish()
-}
-
-pub async fn webfetch_clear(pool: web::Data<SqlitePool>, path: web::Path<String>) -> HttpResponse {
-    let session_id = path.into_inner();
-    if let Err(e) = db::set_webfetch_intercept(pool.get_ref(), &session_id, false).await {
-        return HttpResponse::InternalServerError().body(format!("DB error: {}", e));
-    }
-    HttpResponse::SeeOther()
-        .insert_header((
-            "Location",
-            format!("/_dashboard/sessions/{}/websearch", session_id),
-        ))
-        .finish()
-}
-
-pub async fn websearch_fail(
-    path: web::Path<(String, String)>,
-    approval_queue: web::Data<ApprovalQueue>,
-) -> HttpResponse {
-    let (session_id, approval_id) = path.into_inner();
-    proxy::websearch::resolve_pending(
-        approval_queue.get_ref(),
-        &approval_id,
-        ApprovalDecision::Fail,
-    );
-    HttpResponse::SeeOther()
-        .insert_header((
-            "Location",
-            format!("/_dashboard/sessions/{}/websearch", session_id),
-        ))
-        .finish()
-}
-
-pub async fn websearch_mock(
-    path: web::Path<(String, String)>,
-    approval_queue: web::Data<ApprovalQueue>,
-) -> HttpResponse {
-    let (session_id, approval_id) = path.into_inner();
-    proxy::websearch::resolve_pending(
-        approval_queue.get_ref(),
-        &approval_id,
-        ApprovalDecision::Mock,
-    );
-    HttpResponse::SeeOther()
-        .insert_header((
-            "Location",
-            format!("/_dashboard/sessions/{}/websearch", session_id),
-        ))
-        .finish()
-}
-
-pub async fn websearch_accept(
-    path: web::Path<(String, String)>,
-    approval_queue: web::Data<ApprovalQueue>,
-) -> HttpResponse {
-    let (session_id, approval_id) = path.into_inner();
-    proxy::websearch::resolve_pending(
-        approval_queue.get_ref(),
-        &approval_id,
-        ApprovalDecision::Accept,
-    );
-    HttpResponse::SeeOther()
-        .insert_header((
-            "Location",
-            format!("/_dashboard/sessions/{}/websearch", session_id),
-        ))
-        .finish()
-}
-
-pub async fn websearch_whitelist_set(
-    pool: web::Data<SqlitePool>,
-    path: web::Path<String>,
-    form: web::Form<HashMap<String, String>>,
-) -> HttpResponse {
-    let session_id = path.into_inner();
-    let whitelist = form.get("whitelist").map(|s| s.as_str()).unwrap_or("");
-    let whitelist = if whitelist.trim().is_empty() {
-        None
-    } else {
-        Some(whitelist)
-    };
-    if let Err(e) = db::set_websearch_whitelist(pool.get_ref(), &session_id, whitelist).await {
-        return HttpResponse::InternalServerError().body(format!("DB error: {}", e));
-    }
-    HttpResponse::SeeOther()
-        .insert_header((
-            "Location",
-            format!("/_dashboard/sessions/{}/websearch", session_id),
-        ))
-        .finish()
-}
-
-pub async fn websearch_whitelist_clear(
-    pool: web::Data<SqlitePool>,
-    path: web::Path<String>,
-) -> HttpResponse {
-    let session_id = path.into_inner();
-    if let Err(e) = db::set_websearch_whitelist(pool.get_ref(), &session_id, None).await {
-        return HttpResponse::InternalServerError().body(format!("DB error: {}", e));
-    }
-    HttpResponse::SeeOther()
-        .insert_header((
-            "Location",
-            format!("/_dashboard/sessions/{}/websearch", session_id),
-        ))
-        .finish()
-}
-
-pub async fn websearch_tool_names_set(
-    pool: web::Data<SqlitePool>,
-    path: web::Path<String>,
-    form: web::Form<HashMap<String, String>>,
-) -> HttpResponse {
-    let session_id = path.into_inner();
-    let tool_names = form
-        .get("tool_names")
-        .map(|s| s.as_str())
-        .unwrap_or("WebSearch");
-    if let Err(e) = db::set_websearch_tool_names(pool.get_ref(), &session_id, tool_names).await {
-        return HttpResponse::InternalServerError().body(format!("DB error: {}", e));
-    }
-    HttpResponse::SeeOther()
-        .insert_header((
-            "Location",
-            format!("/_dashboard/sessions/{}/websearch", session_id),
-        ))
-        .finish()
-}
-
-pub async fn webfetch_tool_names_set(
-    pool: web::Data<SqlitePool>,
-    path: web::Path<String>,
-    form: web::Form<HashMap<String, String>>,
-) -> HttpResponse {
-    let session_id = path.into_inner();
-    let tool_names = form
-        .get("tool_names")
-        .map(|s| s.as_str())
-        .unwrap_or("WebFetch");
-    if let Err(e) = db::set_webfetch_tool_names(pool.get_ref(), &session_id, tool_names).await {
-        return HttpResponse::InternalServerError().body(format!("DB error: {}", e));
-    }
-    HttpResponse::SeeOther()
-        .insert_header((
-            "Location",
-            format!("/_dashboard/sessions/{}/websearch", session_id),
-        ))
         .finish()
 }

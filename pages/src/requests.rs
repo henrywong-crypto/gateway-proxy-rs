@@ -1,16 +1,17 @@
 use common::models::{ProxyRequest, Session};
 use leptos::{either::Either, prelude::*};
 use std::collections::HashMap;
-use templates::{Breadcrumb, NavLink, Page};
+use templates::{pagination_nav, Breadcrumb, NavLink, Page, Pagination};
 
-pub fn render_requests_index(
+pub fn render_requests_view(
     session: &Session,
     requests: &[ProxyRequest],
     auto_refresh: bool,
+    pagination: &Pagination,
 ) -> String {
     let session = session.clone();
     let requests = requests.to_vec();
-    let total = requests.len();
+    let total = pagination.total_items;
 
     let refresh_href = if auto_refresh {
         format!("/_dashboard/sessions/{}/requests?refresh=off", session.id)
@@ -23,6 +24,9 @@ pub fn render_requests_index(
         "Enable auto-refresh"
     };
 
+    let nav_top = pagination_nav(pagination);
+    let nav_bottom = pagination_nav(pagination);
+
     let content = view! {
         {if auto_refresh {
             Some(view! { <meta http-equiv="refresh" content="3"/> })
@@ -32,6 +36,7 @@ pub fn render_requests_index(
         <h2>"Requests"</h2>
         <p>{format!("Total: {}", total)}</p>
         <a href={refresh_href}>{refresh_label}</a>
+        {nav_top}
         {if requests.is_empty() {
             Either::Left(view! {
                 <p>"No requests yet."</p>
@@ -75,6 +80,7 @@ pub fn render_requests_index(
                 </table>
             })
         }}
+        {nav_bottom}
     };
 
     Page {

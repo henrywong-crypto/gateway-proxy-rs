@@ -1,5 +1,6 @@
 use actix_web::{web, HttpRequest, HttpResponse};
-use proxy::websearch::ApprovalQueue;
+use common::config::AppConfig;
+use proxy::webfetch::ApprovalQueue;
 use sqlx::SqlitePool;
 
 pub async fn proxy_catch_all(
@@ -8,8 +9,9 @@ pub async fn proxy_catch_all(
     pool: web::Data<SqlitePool>,
     client: web::Data<reqwest::Client>,
     approval_queue: web::Data<ApprovalQueue>,
+    config: web::Data<AppConfig>,
 ) -> Result<HttpResponse, actix_web::Error> {
-    proxy::proxy_handler(req, body, pool, client, approval_queue).await
+    proxy::proxy_handler(req, body, pool, client, approval_queue, config).await
 }
 
 pub async fn bedrock_invoke(

@@ -1,34 +1,42 @@
 use leptos::{either::Either, prelude::*};
 
-pub fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-}
-
 const COLLAPSE_THRESHOLD: usize = 200;
 
-pub fn collapsible_block(content: &str, css_class: &str) -> String {
-    let escaped = html_escape(content);
+pub fn collapsible_block(content: &str, css_class: &str) -> AnyView {
     if content.len() <= COLLAPSE_THRESHOLD {
-        if content.contains('\n') {
-            return format!(r#"<pre class="{}">{}</pre>"#, css_class, escaped);
+        let tag_content = content.to_string();
+        let class = css_class.to_string();
+        return if content.contains('\n') {
+            view! { <pre class={class}>{tag_content}</pre> }.into_any()
         } else {
-            return format!(r#"<div class="{}">{}</div>"#, css_class, escaped);
-        }
+            view! { <div class={class}>{tag_content}</div> }.into_any()
+        };
     }
     let preview: String = content.chars().take(COLLAPSE_THRESHOLD).collect();
-    let preview_escaped = html_escape(&preview);
-    format!(
-        r#"<details class="collapsible"><summary><span class="preview-text {cls}">{preview}...</span> <span class="show-more">show more</span><span class="show-less">show less</span></summary><div class="collapsible-full {cls}">{full}</div></details>"#,
-        cls = css_class,
-        preview = preview_escaped,
-        full = escaped
-    )
+    let preview_display = format!("{}...", preview);
+    let preview_class = format!("preview-text {}", css_class);
+    let full_class = format!("collapsible-full {}", css_class);
+    let content = content.to_string();
+    view! {
+        <details class="collapsible">
+            <summary>
+                <span class={preview_class}>{preview_display}</span>
+                " "
+                <span class="show-more">"show more"</span>
+                <span class="show-less">"show less"</span>
+            </summary>
+            <div class={full_class}>{content}</div>
+        </details>
+    }
+    .into_any()
 }
 
 pub fn page_layout(title: &str, body_html: String) -> String {
+    let title = title
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;");
     format!(
         r#"<!DOCTYPE html>
 <html>
@@ -60,7 +68,7 @@ details.collapsible[open] > summary .show-less {{ display: inline; }}
 {body_html}
 </body>
 </html>"#,
-        title = html_escape(title),
+        title = title,
         body_html = body_html
     )
 }
@@ -109,21 +117,30 @@ impl NavLink {
 
 pub struct InfoRow {
     pub label: String,
-    pub value: String,
+    pub value: AnyView,
 }
 
 impl InfoRow {
     pub fn new(label: &str, value: &str) -> Self {
+        let v = value.to_string();
         Self {
             label: label.to_string(),
-            value: html_escape(value),
+            value: v.into_any(),
         }
     }
 
-    pub fn raw(label: &str, value: impl ToString) -> Self {
+    pub fn raw(label: &str, html: impl ToString) -> Self {
+        let html = html.to_string();
         Self {
             label: label.to_string(),
-            value: value.to_string(),
+            value: (view! { <span inner_html={html}></span> }).into_any(),
+        }
+    }
+
+    pub fn view(label: &str, value: impl IntoView + 'static) -> Self {
+        Self {
+            label: label.to_string(),
+            value: value.into_any(),
         }
     }
 }
@@ -142,6 +159,72 @@ impl Subpage {
             count: count.to_string(),
         }
     }
+}
+
+pub struct Pagination {
+    pub current_page: i64,
+    pub total_pages: i64,
+    pub total_items: i64,
+    pub base_url: String,
+    pub extra_params: String,
+}
+
+impl Pagination {
+    pub fn new(
+        current_page: i64,
+        total_items: i64,
+        per_page: i64,
+        base_url: impl ToString,
+        extra_params: impl ToString,
+    ) -> Self {
+        let total_pages = if total_items == 0 {
+            1
+        } else {
+            (total_items + per_page - 1) / per_page
+        };
+        Self {
+            current_page,
+            total_pages,
+            total_items,
+            base_url: base_url.to_string(),
+            extra_params: extra_params.to_string(),
+        }
+    }
+}
+
+pub fn pagination_nav(p: &Pagination) -> AnyView {
+    if p.total_pages <= 1 {
+        return ().into_any();
+    }
+
+    let info = format!("Page {} of {}", p.current_page, p.total_pages);
+    let prev = if p.current_page > 1 {
+        let href = format!(
+            "{}?page={}{}",
+            p.base_url,
+            p.current_page - 1,
+            p.extra_params
+        );
+        Either::Left(view! { <a href={href}>"Previous"</a> })
+    } else {
+        Either::Right(())
+    };
+    let next = if p.current_page < p.total_pages {
+        let href = format!(
+            "{}?page={}{}",
+            p.base_url,
+            p.current_page + 1,
+            p.extra_params
+        );
+        Either::Left(view! { <a href={href}>"Next"</a> })
+    } else {
+        Either::Right(())
+    };
+
+    view! {
+        <p>{info}" "{prev}" "{next}</p>
+    }
+    .into_any()
 }
 
 pub struct Page<C: IntoView = ()> {
@@ -216,7 +299,7 @@ impl<C: IntoView> Page<C> {
                     <h2>"Info"</h2>
                     <table>
                         {info_rows.into_iter().map(|row| {
-                            view! { <tr><td>{row.label}</td><td inner_html={row.value}></td></tr> }
+                            view! { <tr><td>{row.label}</td><td>{row.value}</td></tr> }
                         }).collect::<Vec<_>>()}
                     </table>
                 })
@@ -250,41 +333,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn html_escape_special_chars() {
-        assert_eq!(
-            html_escape("<b>\"a&b\"</b>"),
-            "&lt;b&gt;&quot;a&amp;b&quot;&lt;/b&gt;"
-        );
-    }
-
-    #[test]
-    fn html_escape_no_special_chars() {
-        assert_eq!(html_escape("hello world"), "hello world");
-    }
-
-    #[test]
     fn collapsible_block_short_single_line() {
-        let result = collapsible_block("short text", "cls");
-        assert_eq!(result, r#"<div class="cls">short text</div>"#);
+        let result = collapsible_block("short text", "cls").to_html();
+        assert!(result.contains(r#"class="cls""#));
+        assert!(result.contains("short text"));
+        assert!(result.starts_with("<div"));
+        assert!(!result.contains("<pre"));
     }
 
     #[test]
     fn collapsible_block_short_multiline() {
-        let result = collapsible_block("line1\nline2", "cls");
-        assert_eq!(
-            result,
-            r#"<pre class="cls">line1
-line2</pre>"#
-        );
+        let result = collapsible_block("line1\nline2", "cls").to_html();
+        assert!(result.contains(r#"class="cls""#));
+        assert!(result.contains("line1\nline2"));
+        assert!(result.starts_with("<pre"));
     }
 
     #[test]
     fn collapsible_block_long_content() {
         let long = "a".repeat(300);
-        let result = collapsible_block(&long, "cls");
+        let result = collapsible_block(&long, "cls").to_html();
         assert!(result.contains("show more"));
         assert!(result.contains("show less"));
         assert!(result.contains("collapsible"));
+    }
+
+    #[test]
+    fn collapsible_block_escapes_content() {
+        let result = collapsible_block("<script>alert(1)</script>", "cls").to_html();
+        assert!(result.contains("&lt;script&gt;"));
+        assert!(!result.contains("<script>alert"));
     }
 
     #[test]

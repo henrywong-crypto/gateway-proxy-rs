@@ -1,7 +1,15 @@
 use common::models::ProxyRequest;
 use sqlx::sqlite::SqlitePool;
 
-pub struct InsertRequestParams<'a> {
+/// All columns for the `requests` table, used in SELECT queries.
+const REQUEST_COLUMNS: &str = "\
+    id, session_id, method, path, timestamp, headers_json, body_json, \
+    truncated_json, model, tools_json, messages_json, system_json, params_json, \
+    note, created_at, response_status, response_headers_json, response_body, \
+    response_events_json, webfetch_first_response_body, webfetch_first_response_events_json, \
+    webfetch_followup_body_json, webfetch_rounds_json";
+
+pub struct CreateRequestParams<'a> {
     pub session_id: &'a str,
     pub method: &'a str,
     pub path: &'a str,
@@ -21,35 +29,54 @@ pub async fn list_requests(
     pool: &SqlitePool,
     session_id: &str,
 ) -> anyhow::Result<Vec<ProxyRequest>> {
-    Ok(sqlx::query_as::<_, ProxyRequest>(
-        "SELECT id, session_id, method, path, timestamp, headers_json, body_json, \
-         truncated_json, model, tools_json, messages_json, system_json, params_json, \
-         note, created_at, response_status, response_headers_json, response_body, \
-         response_events_json, ws_first_response_body, ws_first_response_events_json, \
-         ws_followup_body_json, ws_rounds_json FROM requests WHERE session_id = ? ORDER BY created_at DESC",
-    )
+    Ok(sqlx::query_as::<_, ProxyRequest>(&format!(
+        "SELECT {} FROM requests WHERE session_id = ? ORDER BY created_at DESC",
+        REQUEST_COLUMNS
+    ))
     .bind(session_id)
     .fetch_all(pool)
     .await?)
 }
 
+pub async fn count_requests(pool: &SqlitePool, session_id: &str) -> anyhow::Result<i64> {
+    let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM requests WHERE session_id = ?")
+        .bind(session_id)
+        .fetch_one(pool)
+        .await?;
+    Ok(row.0)
+}
+
+pub async fn list_requests_paginated(
+    pool: &SqlitePool,
+    session_id: &str,
+    limit: i64,
+    offset: i64,
+) -> anyhow::Result<Vec<ProxyRequest>> {
+    Ok(sqlx::query_as::<_, ProxyRequest>(&format!(
+        "SELECT {} FROM requests WHERE session_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        REQUEST_COLUMNS
+    ))
+    .bind(session_id)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(pool)
+    .await?)
+}
+
 pub async fn get_request(pool: &SqlitePool, req_id: &str) -> anyhow::Result<Option<ProxyRequest>> {
-    Ok(sqlx::query_as::<_, ProxyRequest>(
-        "SELECT id, session_id, method, path, timestamp, headers_json, body_json, \
-         truncated_json, model, tools_json, messages_json, system_json, params_json, \
-         note, created_at, response_status, response_headers_json, response_body, \
-         response_events_json, ws_first_response_body, ws_first_response_events_json, \
-         ws_followup_body_json, ws_rounds_json FROM requests WHERE id = ?",
-    )
+    Ok(sqlx::query_as::<_, ProxyRequest>(&format!(
+        "SELECT {} FROM requests WHERE id = ?",
+        REQUEST_COLUMNS
+    ))
     .bind(req_id)
     .fetch_all(pool)
     .await?
     .pop())
 }
 
-pub async fn insert_request(
+pub async fn create_request(
     pool: &SqlitePool,
-    params: &InsertRequestParams<'_>,
+    params: &CreateRequestParams<'_>,
 ) -> anyhow::Result<String> {
     let id = uuid::Uuid::new_v4().to_string();
     sqlx::query(
@@ -76,7 +103,7 @@ pub async fn insert_request(
     Ok(id)
 }
 
-pub async fn update_request_response(
+pub async fn set_request_response(
     pool: &SqlitePool,
     request_id: &str,
     response_status: i64,
@@ -106,7 +133,7 @@ pub async fn clear_requests(pool: &SqlitePool, session_id: &str) -> anyhow::Resu
     Ok(())
 }
 
-pub async fn update_request_note(
+pub async fn set_request_note(
     pool: &SqlitePool,
     request_id: &str,
     note: &str,
@@ -119,22 +146,22 @@ pub async fn update_request_note(
     Ok(())
 }
 
-pub async fn update_websearch_data(
+pub async fn set_request_webfetch_data(
     pool: &SqlitePool,
     request_id: &str,
-    ws_first_response_body: Option<&str>,
-    ws_first_response_events_json: Option<&str>,
-    ws_followup_body_json: Option<&str>,
-    ws_rounds_json: Option<&str>,
+    webfetch_first_response_body: Option<&str>,
+    webfetch_first_response_events_json: Option<&str>,
+    webfetch_followup_body_json: Option<&str>,
+    webfetch_rounds_json: Option<&str>,
 ) -> anyhow::Result<()> {
     sqlx::query(
-        "UPDATE requests SET ws_first_response_body = ?, ws_first_response_events_json = ?, \
-         ws_followup_body_json = ?, ws_rounds_json = ? WHERE id = ?",
+        "UPDATE requests SET webfetch_first_response_body = ?, webfetch_first_response_events_json = ?, \
+         webfetch_followup_body_json = ?, webfetch_rounds_json = ? WHERE id = ?",
     )
-    .bind(ws_first_response_body)
-    .bind(ws_first_response_events_json)
-    .bind(ws_followup_body_json)
-    .bind(ws_rounds_json)
+    .bind(webfetch_first_response_body)
+    .bind(webfetch_first_response_events_json)
+    .bind(webfetch_followup_body_json)
+    .bind(webfetch_rounds_json)
     .bind(request_id)
     .execute(pool)
     .await?;

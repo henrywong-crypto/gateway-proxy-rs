@@ -1,15 +1,19 @@
 use common::models::{FilterProfile, Session};
 use leptos::{either::Either, prelude::*};
-use templates::{Breadcrumb, InfoRow, NavLink, Page, Subpage};
+use templates::{pagination_nav, Breadcrumb, InfoRow, NavLink, Page, Pagination, Subpage};
 
-pub fn render_sessions_index(sessions: &[Session]) -> String {
+pub fn render_sessions_view(sessions: &[Session], pagination: &Pagination) -> String {
     let sessions = sessions.to_vec();
     let empty = sessions.is_empty();
-    let total = sessions.len();
+    let total = pagination.total_items;
+
+    let nav_top = pagination_nav(pagination);
+    let nav_bottom = pagination_nav(pagination);
 
     let content = view! {
         <h2>"Sessions"</h2>
         <p>{format!("Total: {}", total)}</p>
+        {nav_top}
         {if empty {
             Either::Left(view! {
                 <p>"No sessions yet."</p>
@@ -52,6 +56,7 @@ pub fn render_sessions_index(sessions: &[Session]) -> String {
                 </table>
             })
         }}
+        {nav_bottom}
     };
 
     Page {
@@ -71,7 +76,7 @@ pub fn render_sessions_index(sessions: &[Session]) -> String {
     .render()
 }
 
-pub fn render_new_session(profiles: &[FilterProfile], default_profile_id: &str) -> String {
+pub fn render_new_session_form(profiles: &[FilterProfile], default_profile_id: &str) -> String {
     let profiles = profiles.to_vec();
     let default_profile_id = default_profile_id.to_string();
 
@@ -141,7 +146,11 @@ pub fn render_new_session(profiles: &[FilterProfile], default_profile_id: &str) 
     .render()
 }
 
-pub fn render_edit_session(session: &Session, port: u16, profiles: &[FilterProfile]) -> String {
+pub fn render_edit_session_form(
+    session: &Session,
+    port: u16,
+    profiles: &[FilterProfile],
+) -> String {
     let session = session.clone();
     let session_name = session.name.clone();
     let edit_action = format!("/_dashboard/sessions/{}/edit", session.id);

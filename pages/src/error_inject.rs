@@ -1,8 +1,8 @@
 use common::{error_inject::ERROR_TYPES, models::Session};
 use leptos::{either::Either, prelude::*};
-use templates::{html_escape, Breadcrumb, NavLink, Page};
+use templates::{Breadcrumb, NavLink, Page};
 
-pub fn render_error_inject(session: &Session) -> String {
+pub fn render_error_inject_view(session: &Session) -> String {
     let session_id = session.id.to_string();
     let form_action = format!("/_dashboard/sessions/{}/error-inject", session_id);
     let clear_action = format!("/_dashboard/sessions/{}/error-inject/clear", session_id);
@@ -10,36 +10,38 @@ pub fn render_error_inject(session: &Session) -> String {
     let active_key = session.error_inject.clone().unwrap_or_default();
     let is_active = !active_key.is_empty();
 
-    let active_label = common::error_inject::label_for_key(&active_key).unwrap_or("unknown");
+    let active_label = common::error_inject::find_by_key(&active_key)
+        .map(|e| e.label)
+        .unwrap_or("unknown");
 
-    let mut rows_html = String::new();
-    for error in ERROR_TYPES {
-        let is_selected = error.key == active_key;
-        let row_class = if is_selected {
-            " class=\"filtered-row\""
-        } else {
-            ""
-        };
-        let badge = if is_selected {
-            " <span class=\"filtered-badge\">[ACTIVE]</span>"
-        } else {
-            ""
-        };
-        rows_html.push_str(&format!(
-            "<tr{}><td>{}{}</td><td><pre>{}</pre></td><td><form method=\"POST\" action=\"{}\"><input type=\"hidden\" name=\"error_type\" value=\"{}\"/><button type=\"submit\">Inject</button></form></td></tr>",
-            row_class,
-            html_escape(error.label),
-            badge,
-            html_escape(error.data_json),
-            html_escape(&form_action),
-            html_escape(error.key),
-        ));
-    }
-
-    let table_html = format!(
-        "<table><tr><th>Error Type</th><th>SSE Payload</th><th></th></tr>{}</table>",
-        rows_html
-    );
+    let rows: Vec<_> = ERROR_TYPES
+        .iter()
+        .map(|error| {
+            let is_selected = error.key == active_key;
+            let row_class = if is_selected { "filtered-row" } else { "" };
+            let label = error.label.to_string();
+            let data_json = error.data_json.to_string();
+            let form_action = form_action.clone();
+            let key = error.key.to_string();
+            let badge = if is_selected {
+                Either::Left(view! { " " <span class="filtered-badge">"[ACTIVE]"</span> })
+            } else {
+                Either::Right(())
+            };
+            view! {
+                <tr class={row_class}>
+                    <td>{label}{badge}</td>
+                    <td><pre>{data_json}</pre></td>
+                    <td>
+                        <form method="POST" action={form_action}>
+                            <input type="hidden" name="error_type" value={key}/>
+                            <button type="submit">"Inject"</button>
+                        </form>
+                    </td>
+                </tr>
+            }
+        })
+        .collect();
 
     let content = view! {
         {if is_active {
@@ -62,7 +64,10 @@ pub fn render_error_inject(session: &Session) -> String {
         }}
 
         <h2>"Error Types"</h2>
-        <div inner_html={table_html}/>
+        <table>
+            <tr><th>"Error Type"</th><th>"SSE Payload"</th><th></th></tr>
+            {rows}
+        </table>
     };
 
     Page {

@@ -1,6 +1,14 @@
 use common::models::Session;
 use sqlx::sqlite::SqlitePool;
 
+/// All columns for the `sessions` table, including a computed request_count.
+const SESSION_SELECT: &str = "\
+    SELECT s.id, s.name, s.target_url, s.tls_verify_disabled, s.auth_header, \
+    s.x_api_key, s.profile_id, s.error_inject, s.webfetch_intercept, \
+    s.webfetch_whitelist, s.webfetch_tool_names, s.created_at, \
+    COALESCE((SELECT COUNT(*) FROM requests r WHERE r.session_id = s.id), 0) as request_count \
+    FROM sessions s";
+
 pub async fn count_sessions(pool: &SqlitePool) -> anyhow::Result<i64> {
     let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sessions")
         .fetch_one(pool)
@@ -9,24 +17,35 @@ pub async fn count_sessions(pool: &SqlitePool) -> anyhow::Result<i64> {
 }
 
 pub async fn list_sessions(pool: &SqlitePool) -> anyhow::Result<Vec<Session>> {
-    Ok(sqlx::query_as::<_, Session>(
-        "SELECT s.id, s.name, s.target_url, s.tls_verify_disabled, s.auth_header, s.x_api_key, s.profile_id, s.error_inject, s.websearch_intercept, s.webfetch_intercept, s.websearch_whitelist, s.websearch_tool_names, s.webfetch_tool_names, s.created_at, \
-         COALESCE((SELECT COUNT(*) FROM requests r WHERE r.session_id = s.id), 0) as request_count \
-         FROM sessions s ORDER BY s.created_at DESC",
+    Ok(
+        sqlx::query_as::<_, Session>(&format!("{} ORDER BY s.created_at DESC", SESSION_SELECT))
+            .fetch_all(pool)
+            .await?,
     )
+}
+
+pub async fn list_sessions_paginated(
+    pool: &SqlitePool,
+    limit: i64,
+    offset: i64,
+) -> anyhow::Result<Vec<Session>> {
+    Ok(sqlx::query_as::<_, Session>(&format!(
+        "{} ORDER BY s.created_at DESC LIMIT ? OFFSET ?",
+        SESSION_SELECT
+    ))
+    .bind(limit)
+    .bind(offset)
     .fetch_all(pool)
     .await?)
 }
 
 pub async fn get_session(pool: &SqlitePool, id: &str) -> anyhow::Result<Option<Session>> {
-    Ok(sqlx::query_as::<_, Session>(
-        "SELECT s.id, s.name, s.target_url, s.tls_verify_disabled, s.auth_header, s.x_api_key, s.profile_id, s.error_inject, s.websearch_intercept, s.webfetch_intercept, s.websearch_whitelist, s.websearch_tool_names, s.webfetch_tool_names, s.created_at, \
-         COALESCE((SELECT COUNT(*) FROM requests r WHERE r.session_id = s.id), 0) as request_count \
-         FROM sessions s WHERE s.id = ?",
+    Ok(
+        sqlx::query_as::<_, Session>(&format!("{} WHERE s.id = ?", SESSION_SELECT))
+            .bind(id)
+            .fetch_optional(pool)
+            .await?,
     )
-    .bind(id)
-    .fetch_optional(pool)
-    .await?)
 }
 
 pub struct SessionParams<'a> {
@@ -55,7 +74,7 @@ pub async fn create_session(pool: &SqlitePool, params: &SessionParams<'_>) -> an
     Ok(())
 }
 
-pub async fn set_error_inject(
+pub async fn set_session_error_inject(
     pool: &SqlitePool,
     session_id: &str,
     error_inject: Option<&str>,
@@ -68,20 +87,7 @@ pub async fn set_error_inject(
     Ok(())
 }
 
-pub async fn set_websearch_intercept(
-    pool: &SqlitePool,
-    session_id: &str,
-    enabled: bool,
-) -> anyhow::Result<()> {
-    sqlx::query("UPDATE sessions SET websearch_intercept = ? WHERE id = ?")
-        .bind(enabled)
-        .bind(session_id)
-        .execute(pool)
-        .await?;
-    Ok(())
-}
-
-pub async fn set_webfetch_intercept(
+pub async fn set_session_webfetch_intercept(
     pool: &SqlitePool,
     session_id: &str,
     enabled: bool,
@@ -102,12 +108,12 @@ pub async fn delete_session(pool: &SqlitePool, session_id: &str) -> anyhow::Resu
     Ok(())
 }
 
-pub async fn set_websearch_whitelist(
+pub async fn set_session_webfetch_whitelist(
     pool: &SqlitePool,
     session_id: &str,
     whitelist: Option<&str>,
 ) -> anyhow::Result<()> {
-    sqlx::query("UPDATE sessions SET websearch_whitelist = ? WHERE id = ?")
+    sqlx::query("UPDATE sessions SET webfetch_whitelist = ? WHERE id = ?")
         .bind(whitelist)
         .bind(session_id)
         .execute(pool)
@@ -115,20 +121,7 @@ pub async fn set_websearch_whitelist(
     Ok(())
 }
 
-pub async fn set_websearch_tool_names(
-    pool: &SqlitePool,
-    session_id: &str,
-    tool_names: &str,
-) -> anyhow::Result<()> {
-    sqlx::query("UPDATE sessions SET websearch_tool_names = ? WHERE id = ?")
-        .bind(tool_names)
-        .bind(session_id)
-        .execute(pool)
-        .await?;
-    Ok(())
-}
-
-pub async fn set_webfetch_tool_names(
+pub async fn set_session_webfetch_tool_names(
     pool: &SqlitePool,
     session_id: &str,
     tool_names: &str,

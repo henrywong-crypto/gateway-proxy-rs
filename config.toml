@@ -1,0 +1,43 @@
+# Gateway Proxy configuration
+# Missing fields use built-in defaults.
+
+# Model used by the webfetch agent for summarizing fetched pages.
+# Can be overridden at runtime with the ANTHROPIC_DEFAULT_HAIKU_MODEL env var.
+webfetch_agent_model = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+
+# Mock prompt returned when a WebFetch call is mocked.
+# Available variables: {{url}}
+webfetch_mock_prompt = "[Proxy mock] Web fetch intercepted. URL: '{{url}}'. No real fetch was performed."
+
+# Prompt returned when a cross-host redirect is detected.
+# Available variables: {{original_url}}, {{redirect_url}}, {{status}}, {{prompt}}
+webfetch_redirect_prompt = """
+REDIRECT DETECTED: The URL redirects to a different host.
+
+Original URL: {{original_url}}
+Redirect URL: {{redirect_url}}
+Status: {{status}}
+
+To complete your request, I need to fetch content from the redirected URL. Please use WebFetch again with these parameters:
+- url: "{{redirect_url}}"
+- prompt: "{{prompt}}""""
+
+# Template wrapping fetched page content before sending to the agent.
+# Available variables: {{content}}, {{prompt}}, {{concise}}
+webfetch_accept_prompt = """
+Web page content:
+---
+{{content}}
+---
+
+{{prompt}}
+
+{{#if concise}}\
+Provide a concise response based on the content above. Include relevant details, code examples, and documentation excerpts as needed.\
+{{else}}\
+Provide a concise response based only on the content above. In your response:
+ - Enforce a strict 125-character maximum for quotes from any source document. Open Source Software is ok as long as we respect the license.
+ - Use quotation marks for exact language from articles; any language outside of the quotation should never be word-for-word the same.
+ - You are not a lawyer and never comment on the legality of your own prompts and responses.
+ - Never produce or reproduce exact song lyrics.\
+{{/if}}"""

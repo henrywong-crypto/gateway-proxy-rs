@@ -3,7 +3,7 @@ use serde_json::Value;
 use std::collections::HashSet;
 
 /// Returns true if text matches the pattern (tried as regex first, then substring).
-fn pattern_matches(text: &str, pattern: &str) -> bool {
+fn matches_pattern(text: &str, pattern: &str) -> bool {
     match Regex::new(pattern) {
         Ok(re) => re.is_match(text),
         Err(_) => text.contains(pattern),
@@ -40,7 +40,7 @@ fn apply_system_filters(body: &mut Value, filters: &[String]) {
     };
 
     if let Some(s) = system.as_str().map(|s| s.to_string()) {
-        if filters.iter().any(|f| pattern_matches(&s, f)) {
+        if filters.iter().any(|f| matches_pattern(&s, f)) {
             if let Some(obj) = body.as_object_mut() {
                 obj.remove("system");
             }
@@ -51,7 +51,7 @@ fn apply_system_filters(body: &mut Value, filters: &[String]) {
     if let Some(arr) = system.as_array_mut() {
         arr.retain(|block| {
             let text = block.get("text").and_then(|t| t.as_str()).unwrap_or("");
-            !filters.iter().any(|f| pattern_matches(text, f))
+            !filters.iter().any(|f| matches_pattern(text, f))
         });
         if arr.is_empty() {
             if let Some(obj) = body.as_object_mut() {

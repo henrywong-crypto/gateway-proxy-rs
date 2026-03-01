@@ -1,1 +1,0 @@
-ALTER TABLE sessions ADD COLUMN webfetch_intercept INTEGER NOT NULL DEFAULT 0;

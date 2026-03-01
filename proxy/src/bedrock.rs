@@ -9,9 +9,8 @@ use sqlx::SqlitePool;
 
 use crate::{
     shared::{
-        actix_headers_iter, effective_client, error_inject_data_json, error_inject_status,
-        extract_request_fields, get_session_or_error, headers_to_json, load_filters_for_profile,
-        log_request, to_actix_status, RequestMeta,
+        actix_headers_iter, effective_client, extract_request_fields, get_session_or_error,
+        headers_to_json, load_filters_for_profile, log_request, to_actix_status, RequestMeta,
     },
     sse::parse_sse_events,
 };
@@ -57,7 +56,7 @@ fn encode_event_stream_message(headers: &[(&str, &str)], payload: &[u8]) -> Vec<
 }
 
 /// Convert an Anthropic SSE event data JSON string into a Bedrock Event Stream chunk frame.
-fn anthropic_event_to_bedrock_chunk(data_json: &str) -> Vec<u8> {
+fn encode_bedrock_chunk(data_json: &str) -> Vec<u8> {
     let b64 = BASE64.encode(data_json.as_bytes());
     let payload = format!(r#"{{"bytes":"{}"}}"#, b64);
 
@@ -232,13 +231,12 @@ pub async fn bedrock_streaming_handler(
     // Return the error JSON with the correct HTTP status code so clients recognize it.
     if let Some(ref error_type) = session.error_inject {
         if !error_type.is_empty() {
-            if let Some(data_json) = error_inject_data_json(error_type) {
-                let status = error_inject_status(error_type).unwrap_or(500);
-                let actix_status = actix_web::http::StatusCode::from_u16(status)
+            if let Some(e) = common::error_inject::find_by_key(error_type) {
+                let actix_status = actix_web::http::StatusCode::from_u16(e.status)
                     .unwrap_or(actix_web::http::StatusCode::INTERNAL_SERVER_ERROR);
                 return Ok(HttpResponse::build(actix_status)
                     .insert_header((actix_web::http::header::CONTENT_TYPE, "application/json"))
-                    .body(data_json));
+                    .body(e.data_json));
             }
         }
     }
@@ -329,7 +327,7 @@ pub async fn bedrock_streaming_handler(
         let events = parse_sse_events(&body_str);
         let events_json = serde_json::to_string(&events).unwrap_or_else(|_| "[]".to_string());
 
-        let _ = db::update_request_response(
+        if let Err(e) = db::set_request_response(
             pool.get_ref(),
             &request_id,
             status as i64,
@@ -337,7 +335,10 @@ pub async fn bedrock_streaming_handler(
             Some(&body_str),
             Some(&events_json),
         )
-        .await;
+        .await
+        {
+            log::warn!("bedrock: failed to store error response: {}", e);
+        }
 
         return Ok(HttpResponse::build(actix_status)
             .insert_header((actix_web::http::header::CONTENT_TYPE, "application/json"))
@@ -369,7 +370,7 @@ pub async fn bedrock_streaming_handler(
 
                     let chunk_str = String::from_utf8_lossy(&chunk);
                     for data in parser.feed(&chunk_str) {
-                        let frame = anthropic_event_to_bedrock_chunk(&data);
+                        let frame = encode_bedrock_chunk(&data);
                         if tx.unbounded_send(Ok(Bytes::from(frame))).is_err() {
                             return; // Client disconnected
                         }
@@ -386,7 +387,7 @@ pub async fn bedrock_streaming_handler(
         }
 
         if let Some(data) = parser.flush() {
-            let frame = anthropic_event_to_bedrock_chunk(&data);
+            let frame = encode_bedrock_chunk(&data);
             let _ = tx.unbounded_send(Ok(Bytes::from(frame)));
         }
 
@@ -395,7 +396,7 @@ pub async fn bedrock_streaming_handler(
             let body_str = String::from_utf8_lossy(&accumulated);
             let events = parse_sse_events(&body_str);
             let events_json = serde_json::to_string(&events)?;
-            db::update_request_response(
+            db::set_request_response(
                 pool_bg.get_ref(),
                 &request_id_bg,
                 status as i64,
@@ -519,7 +520,7 @@ mod tests {
     #[test]
     fn bedrock_chunk_base64_roundtrip() {
         let data = r#"{"type":"content_block_delta","delta":{"text":"hi"}}"#;
-        let frame = anthropic_event_to_bedrock_chunk(data);
+        let frame = encode_bedrock_chunk(data);
 
         // Extract payload from the frame (skip 12 bytes prelude, then headers, then payload before final 4-byte CRC)
         let total = u32::from_be_bytes([frame[0], frame[1], frame[2], frame[3]]) as usize;

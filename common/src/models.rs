@@ -11,10 +11,8 @@ pub struct Session {
     pub x_api_key: Option<String>,
     pub profile_id: Option<String>,
     pub error_inject: Option<String>,
-    pub websearch_intercept: bool,
     pub webfetch_intercept: bool,
-    pub websearch_whitelist: Option<String>,
-    pub websearch_tool_names: String,
+    pub webfetch_whitelist: Option<String>,
     pub webfetch_tool_names: String,
     pub created_at: Option<String>,
     #[sqlx(default)]
@@ -44,10 +42,10 @@ pub struct ProxyRequest {
     pub response_headers_json: Option<String>,
     pub response_body: Option<String>,
     pub response_events_json: Option<String>,
-    pub ws_first_response_body: Option<String>,
-    pub ws_first_response_events_json: Option<String>,
-    pub ws_followup_body_json: Option<String>,
-    pub ws_rounds_json: Option<String>,
+    pub webfetch_first_response_body: Option<String>,
+    pub webfetch_first_response_events_json: Option<String>,
+    pub webfetch_followup_body_json: Option<String>,
+    pub webfetch_rounds_json: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -85,3 +83,16 @@ pub struct MessageFilter {
     pub profile_id: uuid::Uuid,
     pub keep_tool_pairs: i64,
 }
+
+#[derive(Debug, Clone)]
+pub struct PendingToolInfo {
+    pub name: String,
+    pub input_summary: String,
+}
+
+pub const DEFAULT_SYSTEM_FILTER_SUGGESTIONS: &[&str] = &[
+    "^x-anthropic-billing-header: cc_version=",
+    "^You are Claude Code, Anthropic's official CLI for Claude.$",
+];
+
+pub const DEFAULT_TOOL_FILTER_SUGGESTIONS: &[&str] = &["WebSearch"];

@@ -2,12 +2,13 @@ pub mod bedrock;
 pub mod filter;
 pub(crate) mod shared;
 pub(crate) mod sse;
-pub mod websearch;
+pub mod webfetch;
 
 use actix_web::{
     error::{ErrorBadGateway, ErrorBadRequest, ErrorInternalServerError},
     web, HttpRequest, HttpResponse,
 };
+use common::config::AppConfig;
 use shared::{
     actix_headers_iter, build_forward_headers, build_injected_sse_error, build_stored_path,
     build_target_url, effective_client, forward_response_headers, get_session_or_error,
@@ -21,7 +22,8 @@ pub async fn proxy_handler(
     body: web::Bytes,
     pool: web::Data<SqlitePool>,
     client: web::Data<reqwest::Client>,
-    approval_queue: web::Data<websearch::ApprovalQueue>,
+    approval_queue: web::Data<webfetch::ApprovalQueue>,
+    config: web::Data<AppConfig>,
 ) -> Result<HttpResponse, actix_web::Error> {
     let full_path = req.match_info().get("tail").unwrap_or("");
     let session_id = req
@@ -109,24 +111,18 @@ pub async fn proxy_handler(
     let parsed_method = reqwest::Method::from_bytes(method.as_bytes())
         .map_err(|e| ErrorBadRequest(format!("Invalid HTTP method: {}", e)))?;
 
-    // Save copies for potential websearch follow-up before the upstream call consumes them
-    let parse_names = |s: &str| -> Vec<String> {
-        s.lines()
+    // Save copies for potential webfetch follow-up before the upstream call consumes them
+    let wf_names: Vec<String> = if session.webfetch_intercept {
+        session
+            .webfetch_tool_names
+            .lines()
             .map(|l| l.trim().to_string())
             .filter(|l| !l.is_empty())
             .collect()
-    };
-    let ws_names = if session.websearch_intercept {
-        parse_names(&session.websearch_tool_names)
     } else {
         vec![]
     };
-    let wf_names = if session.webfetch_intercept {
-        parse_names(&session.webfetch_tool_names)
-    } else {
-        vec![]
-    };
-    let ws_context = if !ws_names.is_empty() || !wf_names.is_empty() {
+    let webfetch_context = if !wf_names.is_empty() {
         Some((forward_body.clone(), forward_headers.clone()))
     } else {
         None
@@ -161,10 +157,10 @@ pub async fn proxy_handler(
 
     let body_str = String::from_utf8_lossy(&response_body);
 
-    // WebSearch interception: if enabled, check for tool_use and send follow-up request
-    if let Some((saved_body, saved_headers)) = ws_context {
+    // WebFetch interception: if enabled, check for tool_use and send follow-up request
+    if let Some((saved_body, saved_headers)) = webfetch_context {
         let whitelist: Vec<String> = session
-            .websearch_whitelist
+            .webfetch_whitelist
             .as_deref()
             .unwrap_or("")
             .lines()
@@ -172,7 +168,7 @@ pub async fn proxy_handler(
             .filter(|l| !l.is_empty())
             .collect();
 
-        if let Some(result) = websearch::maybe_intercept(&websearch::InterceptParams {
+        if let Some(result) = webfetch::maybe_intercept(&webfetch::InterceptParams {
             response_body: &body_str,
             original_body: &saved_body,
             target_url: &target_url,
@@ -183,87 +179,69 @@ pub async fn proxy_handler(
             whitelist: &whitelist,
             pool: pool.get_ref(),
             stored_path: &stored_path,
-            websearch_names: &ws_names,
             webfetch_names: &wf_names,
+            config: config.get_ref(),
         })
         .await
         {
-            match result {
-                websearch::InterceptResult::Annotated { note: ws_note } => {
-                    // Native search: store original response, just annotate the note
-                    store_response(
-                        pool.get_ref(),
-                        &request_id,
-                        status,
-                        Some(&resp_headers_json),
-                        &body_str,
-                    )
-                    .await
-                    .map_err(ErrorInternalServerError)?;
+            let webfetch::InterceptResult::Intercepted {
+                status: followup_status,
+                headers: followup_headers,
+                body: followup_body,
+                note: wf_note,
+                followup_body_json,
+                rounds_json,
+            } = result;
 
-                    let combined_note = match note {
-                        Some(ref n) => format!("{}; {}", n, ws_note),
-                        None => ws_note,
-                    };
-                    let _ =
-                        db::update_request_note(pool.get_ref(), &request_id, &combined_note).await;
+            // Use follow-up response's status, headers, and body
+            let followup_actix_status = to_actix_status(followup_status)?;
+            let followup_resp_headers_json = headers_to_json(
+                followup_headers
+                    .iter()
+                    .filter_map(|(k, v)| v.to_str().ok().map(|s| (k.to_string(), s.to_string()))),
+            )
+            .map_err(ErrorInternalServerError)?;
 
-                    return Ok(builder.body(response_body.to_vec()));
-                }
-                websearch::InterceptResult::Intercepted {
-                    status: followup_status,
-                    headers: followup_headers,
-                    body: followup_body,
-                    note: ws_note,
-                    followup_body_json: ws_followup_body_json,
-                    rounds_json: ws_rounds_json,
-                } => {
-                    // Custom tool: use follow-up response's status, headers, and body
-                    let followup_actix_status = to_actix_status(followup_status)?;
-                    let followup_resp_headers_json =
-                        headers_to_json(followup_headers.iter().filter_map(|(k, v)| {
-                            v.to_str().ok().map(|s| (k.to_string(), s.to_string()))
-                        }))
-                        .map_err(ErrorInternalServerError)?;
+            let mut followup_builder = HttpResponse::build(followup_actix_status);
+            forward_response_headers(&mut followup_builder, &followup_headers);
 
-                    let mut followup_builder = HttpResponse::build(followup_actix_status);
-                    forward_response_headers(&mut followup_builder, &followup_headers);
+            let followup_body_str = String::from_utf8_lossy(&followup_body);
+            store_response(
+                pool.get_ref(),
+                &request_id,
+                followup_status,
+                Some(&followup_resp_headers_json),
+                &followup_body_str,
+            )
+            .await
+            .map_err(ErrorInternalServerError)?;
 
-                    let followup_body_str = String::from_utf8_lossy(&followup_body);
-                    store_response(
-                        pool.get_ref(),
-                        &request_id,
-                        followup_status,
-                        Some(&followup_resp_headers_json),
-                        &followup_body_str,
-                    )
-                    .await
-                    .map_err(ErrorInternalServerError)?;
-
-                    // Store websearch interception data: intercepted response + follow-up body
-                    let ws_first_events = sse::parse_sse_events(&body_str);
-                    let ws_first_events_json =
-                        serde_json::to_string(&ws_first_events).unwrap_or_default();
-                    let _ = db::update_websearch_data(
-                        pool.get_ref(),
-                        &request_id,
-                        Some(&body_str),
-                        Some(&ws_first_events_json),
-                        Some(&ws_followup_body_json),
-                        Some(&ws_rounds_json),
-                    )
-                    .await;
-
-                    let combined_note = match note {
-                        Some(ref n) => format!("{}; {}", n, ws_note),
-                        None => ws_note,
-                    };
-                    let _ =
-                        db::update_request_note(pool.get_ref(), &request_id, &combined_note).await;
-
-                    return Ok(followup_builder.body(followup_body.to_vec()));
-                }
+            // Store webfetch interception data: intercepted response + follow-up body
+            let first_events = sse::parse_sse_events(&body_str);
+            let first_events_json = serde_json::to_string(&first_events).unwrap_or_default();
+            if let Err(e) = db::set_request_webfetch_data(
+                pool.get_ref(),
+                &request_id,
+                Some(&body_str),
+                Some(&first_events_json),
+                Some(&followup_body_json),
+                Some(&rounds_json),
+            )
+            .await
+            {
+                log::warn!("webfetch: failed to store interception data: {}", e);
             }
+
+            let combined_note = match note {
+                Some(ref n) => format!("{}; {}", n, wf_note),
+                None => wf_note,
+            };
+            if let Err(e) = db::set_request_note(pool.get_ref(), &request_id, &combined_note).await
+            {
+                log::warn!("webfetch: failed to store request note: {}", e);
+            }
+
+            return Ok(followup_builder.body(followup_body.to_vec()));
         }
     }
 

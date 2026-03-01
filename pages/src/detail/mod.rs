@@ -3,9 +3,9 @@ mod messages;
 mod sse;
 mod system;
 mod tools;
-mod websearch;
+mod webfetch;
 
-pub use self::websearch::*;
+pub use self::webfetch::*;
 use self::{
     common::{render_kv_table, render_response_headers},
     messages::render_messages,
@@ -18,9 +18,7 @@ use leptos::prelude::*;
 use std::collections::HashMap;
 use templates::{Breadcrumb, InfoRow, NavLink, Page, Subpage};
 
-use crate::pages::html_escape;
-
-fn detail_breadcrumbs(
+fn build_detail_breadcrumbs(
     session: &Session,
     req: &ProxyRequest,
     current_page: Option<&str>,
@@ -52,7 +50,7 @@ fn detail_breadcrumbs(
     crumbs
 }
 
-pub fn render_detail_overview(req: &ProxyRequest, session: &Session) -> String {
+pub fn render_request_detail_view(req: &ProxyRequest, session: &Session) -> String {
     let req = req.clone();
 
     let base = format!(
@@ -61,22 +59,25 @@ pub fn render_detail_overview(req: &ProxyRequest, session: &Session) -> String {
     );
     let has_response = req.response_body.is_some() || req.response_events_json.is_some();
 
-    fn json_array_len(json: Option<&str>) -> Option<usize> {
+    fn count_json_array(json: Option<&str>) -> Option<usize> {
         json.and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
             .and_then(|v| v.as_array().map(|a| a.len()))
     }
 
-    fn json_object_len(json: Option<&str>) -> Option<usize> {
+    fn count_json_object(json: Option<&str>) -> Option<usize> {
         json.and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
             .and_then(|v| v.as_object().map(|o| o.len()))
     }
+
+    let has_ws = req.webfetch_first_response_events_json.is_some()
+        || req.webfetch_followup_body_json.is_some();
 
     let subpage_defs: Vec<(&str, &str, bool, String)> = vec![
         (
             "messages",
             "Messages",
             req.messages_json.is_some(),
-            json_array_len(req.messages_json.as_deref())
+            count_json_array(req.messages_json.as_deref())
                 .map(|n| n.to_string())
                 .unwrap_or_default(),
         ),
@@ -84,7 +85,7 @@ pub fn render_detail_overview(req: &ProxyRequest, session: &Session) -> String {
             "system",
             "System",
             req.system_json.is_some(),
-            json_array_len(req.system_json.as_deref())
+            count_json_array(req.system_json.as_deref())
                 .map(|n| n.to_string())
                 .unwrap_or_default(),
         ),
@@ -92,7 +93,7 @@ pub fn render_detail_overview(req: &ProxyRequest, session: &Session) -> String {
             "tools",
             "Tools",
             req.tools_json.is_some(),
-            json_array_len(req.tools_json.as_deref())
+            count_json_array(req.tools_json.as_deref())
                 .map(|n| n.to_string())
                 .unwrap_or_default(),
         ),
@@ -100,7 +101,7 @@ pub fn render_detail_overview(req: &ProxyRequest, session: &Session) -> String {
             "params",
             "Params",
             req.params_json.is_some(),
-            json_object_len(req.params_json.as_deref())
+            count_json_object(req.params_json.as_deref())
                 .map(|n| n.to_string())
                 .unwrap_or_default(),
         ),
@@ -109,7 +110,7 @@ pub fn render_detail_overview(req: &ProxyRequest, session: &Session) -> String {
             "response_sse",
             "Response SSE",
             req.response_events_json.is_some(),
-            json_array_len(req.response_events_json.as_deref())
+            count_json_array(req.response_events_json.as_deref())
                 .map(|n| n.to_string())
                 .unwrap_or_default(),
         ),
@@ -117,7 +118,7 @@ pub fn render_detail_overview(req: &ProxyRequest, session: &Session) -> String {
             "headers",
             "Request Headers",
             true,
-            json_object_len(req.headers_json.as_deref())
+            count_json_object(req.headers_json.as_deref())
                 .map(|n| n.to_string())
                 .unwrap_or_default(),
         ),
@@ -125,14 +126,14 @@ pub fn render_detail_overview(req: &ProxyRequest, session: &Session) -> String {
             "response_headers",
             "Response Headers",
             has_response,
-            json_object_len(req.response_headers_json.as_deref())
+            count_json_object(req.response_headers_json.as_deref())
                 .map(|n| n.to_string())
                 .unwrap_or_default(),
         ),
         (
-            "websearch",
-            "WebSearch",
-            req.ws_first_response_events_json.is_some() || req.ws_followup_body_json.is_some(),
+            "webfetch_intercept",
+            "WebFetch Intercept",
+            has_ws,
             String::new(),
         ),
     ];
@@ -148,7 +149,7 @@ pub fn render_detail_overview(req: &ProxyRequest, session: &Session) -> String {
             "Gateway Proxy - Session {} - Request #{}",
             session.name, req.id
         ),
-        breadcrumbs: detail_breadcrumbs(session, &req, None),
+        breadcrumbs: build_detail_breadcrumbs(session, &req, None),
         nav_links: vec![NavLink::back()],
         info_rows: vec![
             InfoRow::new("Method", &req.method),
@@ -162,7 +163,7 @@ pub fn render_detail_overview(req: &ProxyRequest, session: &Session) -> String {
     .render()
 }
 
-pub fn render_detail_page(
+pub fn render_request_detail_page_view(
     req: &ProxyRequest,
     session: &Session,
     page: &str,
@@ -194,47 +195,47 @@ pub fn render_detail_page(
         req.session_id, req.id
     );
 
-    let mut controls_html = String::new();
+    let mut controls_view: AnyView = ().into_any();
 
-    let content_html = match page {
+    let content_view: AnyView = match page {
         "messages" => {
             if let Some(ref json_str) = req.messages_json {
                 let toggle_order = if order == "desc" { "asc" } else { "desc" };
                 let toggle_href = format!("{}/messages?order={}", base, toggle_order);
-                controls_html = format!(
-                    r#"<div>Showing: {} | <a href="{}">Switch to {}</a></div>"#,
-                    if order == "desc" {
-                        "newest first"
-                    } else {
-                        "oldest first"
-                    },
-                    toggle_href,
-                    if order == "desc" {
-                        "oldest first"
-                    } else {
-                        "newest first"
-                    }
-                );
+                let showing = if order == "desc" {
+                    "newest first"
+                } else {
+                    "oldest first"
+                };
+                let switch_to = if order == "desc" {
+                    "oldest first"
+                } else {
+                    "newest first"
+                };
+                controls_view = view! {
+                    <div>"Showing: "{showing}" | "<a href={toggle_href}>"Switch to "{switch_to}</a></div>
+                }
+                .into_any();
                 render_messages(json_str, &order, keep_tool_pairs)
             } else {
-                "<p>No messages.</p>".to_string()
+                view! { <p>"No messages."</p> }.into_any()
             }
         }
         "system" => req
             .system_json
             .as_deref()
             .map(|s| render_system(s, filters))
-            .unwrap_or_else(|| "<p>No system prompt.</p>".to_string()),
+            .unwrap_or_else(|| view! { <p>"No system prompt."</p> }.into_any()),
         "tools" => req
             .tools_json
             .as_deref()
             .map(|s| render_tools(s, filters))
-            .unwrap_or_else(|| "<p>No tools.</p>".to_string()),
+            .unwrap_or_else(|| view! { <p>"No tools."</p> }.into_any()),
         "params" => req
             .params_json
             .as_deref()
             .map(render_kv_table)
-            .unwrap_or_else(|| "<p>No params.</p>".to_string()),
+            .unwrap_or_else(|| view! { <p>"No params."</p> }.into_any()),
         "headers" => {
             let h = req.headers_json.as_deref().unwrap_or("{}");
             render_kv_table(h)
@@ -261,18 +262,22 @@ pub fn render_detail_page(
             } else {
                 "Show truncated"
             };
-            controls_html = format!(r#"<a href="{}">{}</a>"#, toggle_href, toggle_label,);
-            format!(
-                r#"<textarea readonly rows="30" cols="80" wrap="off">{}</textarea>"#,
-                html_escape(json)
-            )
+            controls_view = view! {
+                <a href={toggle_href}>{toggle_label}</a>
+            }
+            .into_any();
+            let json = json.to_string();
+            view! {
+                <textarea readonly rows="30" cols="80" wrap="off">{json}</textarea>
+            }
+            .into_any()
         }
         "response_headers" => render_response_headers(&req),
         "response_sse" => render_response_sse(&req),
-        _ => "<p>Unknown tab</p>".to_string(),
+        _ => view! { <p>"Unknown tab"</p> }.into_any(),
     };
 
-    fn json_count(json: Option<&str>) -> Option<usize> {
+    fn count_json_items(json: Option<&str>) -> Option<usize> {
         json.and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
             .and_then(|v| {
                 v.as_array()
@@ -282,24 +287,27 @@ pub fn render_detail_page(
     }
 
     let total_count = match page {
-        "messages" => json_count(req.messages_json.as_deref()),
-        "system" => json_count(req.system_json.as_deref()),
-        "tools" => json_count(req.tools_json.as_deref()),
-        "params" => json_count(req.params_json.as_deref()),
-        "headers" => json_count(req.headers_json.as_deref()),
-        "response_headers" => json_count(req.response_headers_json.as_deref()),
-        "response_sse" => json_count(req.response_events_json.as_deref()),
+        "messages" => count_json_items(req.messages_json.as_deref()),
+        "system" => count_json_items(req.system_json.as_deref()),
+        "tools" => count_json_items(req.tools_json.as_deref()),
+        "params" => count_json_items(req.params_json.as_deref()),
+        "headers" => count_json_items(req.headers_json.as_deref()),
+        "response_headers" => count_json_items(req.response_headers_json.as_deref()),
+        "response_sse" => count_json_items(req.response_events_json.as_deref()),
         _ => None,
     };
-    let total_html = total_count
-        .map(|n| format!("<p>Total: {}</p>", n))
-        .unwrap_or_default();
+    let total_view: AnyView = total_count
+        .map(|n| {
+            let n = n.to_string();
+            view! { <p>"Total: "{n}</p> }.into_any()
+        })
+        .unwrap_or_else(|| ().into_any());
 
     let content = view! {
         <h2>{page_label}</h2>
-        <div inner_html={total_html}/>
-        <div inner_html={controls_html}/>
-        <div inner_html={content_html}/>
+        {total_view}
+        {controls_view}
+        {content_view}
     };
 
     Page {
@@ -307,7 +315,7 @@ pub fn render_detail_page(
             "Gateway Proxy - Session {} - Request #{} - {}",
             session.name, req.id, page_label
         ),
-        breadcrumbs: detail_breadcrumbs(session, &req, Some(page_label)),
+        breadcrumbs: build_detail_breadcrumbs(session, &req, Some(page_label)),
         nav_links: vec![NavLink::back()],
         info_rows: vec![],
         content,

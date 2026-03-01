@@ -1,31 +1,24 @@
 use common::models::Session;
-use templates::{html_escape, Breadcrumb, InfoRow, NavLink, Page, Subpage};
+use leptos::prelude::*;
+use templates::{Breadcrumb, InfoRow, NavLink, Page, Subpage};
 
-fn copy_link_html(text: &str) -> String {
-    format!(
-        r#" <a href="javascript:void(0)" onclick="navigator.clipboard.writeText('{}')">Copy</a>"#,
-        html_escape(text)
-    )
+fn render_copy_link(url: &str) -> impl IntoView {
+    let onclick = format!("navigator.clipboard.writeText('{}')", url);
+    let url = url.to_string();
+    view! {
+        {url}
+        " " <a href="javascript:void(0)" onclick={onclick}>"Copy"</a>
+    }
 }
 
-pub fn render_session_show(session: &Session, port: u16, profile_name: Option<&str>) -> String {
+pub fn render_session_view(session: &Session, port: u16, profile_name: Option<&str>) -> String {
     let proxy_url = format!("http://localhost:{}/_proxy/{}/", port, session.id);
     let bedrock_url = format!("http://localhost:{}/_bedrock/{}/", port, session.id);
 
     let mut info_rows = vec![
         InfoRow::new("Name", &session.name),
-        InfoRow::raw(
-            "Proxy URL",
-            format!("{}{}", html_escape(&proxy_url), copy_link_html(&proxy_url)),
-        ),
-        InfoRow::raw(
-            "Bedrock URL",
-            format!(
-                "{}{}",
-                html_escape(&bedrock_url),
-                copy_link_html(&bedrock_url)
-            ),
-        ),
+        InfoRow::view("Proxy URL", render_copy_link(&proxy_url)),
+        InfoRow::view("Bedrock URL", render_copy_link(&bedrock_url)),
         InfoRow::new("Target", &session.target_url),
     ];
 
@@ -65,15 +58,10 @@ pub fn render_session_show(session: &Session, port: u16, profile_name: Option<&s
                 },
             ),
             Subpage::new(
-                "WebSearch Intercept",
-                format!("/_dashboard/sessions/{}/websearch", session.id),
+                "Intercept",
+                format!("/_dashboard/sessions/{}/intercept", session.id),
                 format!(
-                    "search: {}, fetch: {}",
-                    if session.websearch_intercept {
-                        "on"
-                    } else {
-                        "off"
-                    },
+                    "fetch: {}",
                     if session.webfetch_intercept {
                         "on"
                     } else {

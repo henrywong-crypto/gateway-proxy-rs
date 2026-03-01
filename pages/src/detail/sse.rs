@@ -1,22 +1,22 @@
-use ::common::models::ProxyRequest;
+use common::models::ProxyRequest;
+use leptos::prelude::*;
 use std::collections::HashMap;
 
-use crate::pages::{collapsible_block, html_escape};
+use crate::collapsible_block;
 
-pub fn render_response_sse(req: &ProxyRequest) -> String {
-    let mut html = String::new();
-
+pub fn render_response_sse(req: &ProxyRequest) -> AnyView {
     // SSE events
     if let Some(ref events_json) = req.response_events_json {
         if let Ok(events) = serde_json::from_str::<Vec<serde_json::Value>>(events_json) {
-            html.push_str(&format!("{} SSE events", events.len()));
-            html.push_str("<table><tr><th>#</th><th>Event</th><th>Data</th><th>Raw</th></tr>");
+            let count = events.len().to_string();
 
             // Track accumulated text/json per content block index
             let mut block_text: HashMap<i64, String> = HashMap::new();
             let mut block_json: HashMap<i64, String> = HashMap::new();
             let mut block_names: HashMap<i64, String> = HashMap::new();
             let mut block_types: HashMap<i64, String> = HashMap::new();
+
+            let mut rows: Vec<AnyView> = Vec::new();
 
             for (i, event) in events.iter().enumerate() {
                 let event_type = event.get("event").and_then(|e| e.as_str()).unwrap_or("");
@@ -72,17 +72,24 @@ pub fn render_response_sse(req: &ProxyRequest) -> String {
 
                 let summary = summarize_sse_event(event_type, data);
                 let raw = serde_json::to_string_pretty(data).unwrap_or_default();
-                let raw_html = format!(
-                    r#"<details class="collapsible"><summary><span class="show-more">show raw</span></summary><pre class="collapsible-full">{}</pre></details>"#,
-                    html_escape(&raw),
+                let idx = (i + 1).to_string();
+                let event_type_str = event_type.to_string();
+                rows.push(
+                    view! {
+                        <tr>
+                            <td>{idx}</td>
+                            <td>{event_type_str}</td>
+                            <td>{summary}</td>
+                            <td>
+                                <details class="collapsible">
+                                    <summary><span class="show-more">"show raw"</span></summary>
+                                    <pre class="collapsible-full">{raw}</pre>
+                                </details>
+                            </td>
+                        </tr>
+                    }
+                    .into_any(),
                 );
-                html.push_str(&format!(
-                    "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
-                    i + 1,
-                    html_escape(event_type),
-                    summary,
-                    raw_html,
-                ));
 
                 // Insert summary row after content_block_stop
                 if event_type == "content_block_stop" {
@@ -91,12 +98,12 @@ pub fn render_response_sse(req: &ProxyRequest) -> String {
                     let name = block_names.get(&index).map(|s| s.as_str()).unwrap_or("");
 
                     let label = if !name.is_empty() {
-                        format!("{} — {}", html_escape(btype), html_escape(name))
+                        format!("{} — {}", btype, name)
                     } else {
-                        html_escape(btype)
+                        btype.to_string()
                     };
 
-                    let content = if let Some(json_str) = block_json.get(&index) {
+                    let content: AnyView = if let Some(json_str) = block_json.get(&index) {
                         let formatted = serde_json::from_str::<serde_json::Value>(json_str)
                             .and_then(|v| serde_json::to_string_pretty(&v))
                             .unwrap_or_else(|_| json_str.clone());
@@ -104,25 +111,39 @@ pub fn render_response_sse(req: &ProxyRequest) -> String {
                     } else if let Some(text) = block_text.get(&index) {
                         collapsible_block(text, "")
                     } else {
-                        String::new()
+                        ().into_any()
                     };
 
-                    if !content.is_empty() {
-                        html.push_str(&format!(
-                            "<tr><td></td><td><strong>{}</strong></td><td colspan=\"2\">{}</td></tr>",
-                            label,
-                            content,
-                        ));
-                    }
+                    rows.push(
+                        view! {
+                            <tr>
+                                <td></td>
+                                <td><strong>{label}</strong></td>
+                                <td colspan="2">{content}</td>
+                            </tr>
+                        }
+                        .into_any(),
+                    );
                 }
             }
-            html.push_str("</table>");
+
+            return view! {
+                {count}" SSE events"
+                <table>
+                    <tr><th>"#"</th><th>"Event"</th><th>"Data"</th><th>"Raw"</th></tr>
+                    {rows}
+                </table>
+            }
+            .into_any();
         }
-    } else if let Some(ref body) = req.response_body {
-        html.push_str(&format!("<pre>{}</pre>", html_escape(body)));
     }
 
-    html
+    if let Some(ref body) = req.response_body {
+        let body = body.clone();
+        return view! { <pre>{body}</pre> }.into_any();
+    }
+
+    ().into_any()
 }
 
 pub fn summarize_sse_event(event_type: &str, data: &serde_json::Value) -> String {
@@ -140,12 +161,7 @@ pub fn summarize_sse_event(event_type: &str, data: &serde_json::Value) -> String
                 .pointer("/message/id")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let mut parts = vec![format!(
-                "{} {} {}",
-                html_escape(model),
-                html_escape(role),
-                html_escape(id)
-            )];
+            let mut parts = vec![format!("{} {} {}", model, role, id)];
             for key in &[
                 "input_tokens",
                 "output_tokens",
@@ -172,9 +188,9 @@ pub fn summarize_sse_event(event_type: &str, data: &serde_json::Value) -> String
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             if name.is_empty() {
-                format!("[{}] {}", index, html_escape(btype))
+                format!("[{}] {}", index, btype)
             } else {
-                format!("[{}] {} {}", index, html_escape(btype), html_escape(name))
+                format!("[{}] {} {}", index, btype, name)
             }
         }
         "content_block_delta" => {
@@ -183,38 +199,32 @@ pub fn summarize_sse_event(event_type: &str, data: &serde_json::Value) -> String
             match dtype {
                 "text_delta" => {
                     let text = delta.get("text").and_then(|v| v.as_str()).unwrap_or("");
-                    let preview = if text.len() > 80 {
+                    if text.len() > 80 {
                         format!("{}...", &text[..80])
                     } else {
                         text.to_string()
-                    };
-                    html_escape(&preview)
+                    }
                 }
                 "thinking_delta" => {
                     let text = delta.get("thinking").and_then(|v| v.as_str()).unwrap_or("");
-                    let preview = if text.len() > 80 {
+                    if text.len() > 80 {
                         format!("{}...", &text[..80])
                     } else {
                         text.to_string()
-                    };
-                    html_escape(&preview)
+                    }
                 }
                 "input_json_delta" => {
                     let json = delta
                         .get("partial_json")
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
-                    let preview = if json.len() > 80 {
+                    if json.len() > 80 {
                         format!("{}...", &json[..80])
                     } else {
                         json.to_string()
-                    };
-                    html_escape(&preview)
+                    }
                 }
-                _ => {
-                    let s = serde_json::to_string(delta).unwrap_or_default();
-                    html_escape(&s)
-                }
+                _ => serde_json::to_string(delta).unwrap_or_default(),
             }
         }
         "content_block_stop" => {
@@ -228,7 +238,7 @@ pub fn summarize_sse_event(event_type: &str, data: &serde_json::Value) -> String
                 .unwrap_or("");
             let mut parts = Vec::new();
             if !stop_reason.is_empty() {
-                parts.push(format!("stop: {}", html_escape(stop_reason)));
+                parts.push(format!("stop: {}", stop_reason));
             }
             for key in &[
                 "input_tokens",
@@ -248,12 +258,11 @@ pub fn summarize_sse_event(event_type: &str, data: &serde_json::Value) -> String
         "message_stop" => String::new(),
         _ => {
             let s = serde_json::to_string(data).unwrap_or_default();
-            let preview = if s.len() > 120 {
+            if s.len() > 120 {
                 format!("{}...", &s[..120])
             } else {
                 s
-            };
-            html_escape(&preview)
+            }
         }
     }
 }
