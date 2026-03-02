@@ -10,28 +10,28 @@ use super::{
 };
 
 pub fn render_kv_table(json_str: &str) -> AnyView {
-    let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) else {
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_str) else {
         let s = json_str.to_string();
         return view! { <pre>{s}</pre> }.into_any();
     };
 
-    let Some(obj) = val.as_object() else {
+    let Some(obj) = parsed.as_object() else {
         let s = json_str.to_string();
         return view! { <pre>{s}</pre> }.into_any();
     };
 
     let rows: Vec<AnyView> = obj
         .iter()
-        .map(|(k, v)| {
-            let val_str = if v.is_string() {
-                v.as_str().unwrap_or("").to_string()
+        .map(|(key, value)| {
+            let val_str = if value.is_string() {
+                value.as_str().unwrap_or("").to_string()
             } else {
-                serde_json::to_string_pretty(v).unwrap_or_default()
+                serde_json::to_string_pretty(value).unwrap_or_default()
             };
-            let k = k.clone();
+            let key = key.clone();
             let cb = collapsible_block(&val_str, "");
             view! {
-                <tr><td>{k}</td><td>{cb}</td></tr>
+                <tr><td>{key}</td><td>{cb}</td></tr>
             }
             .into_any()
         })
@@ -77,21 +77,22 @@ pub fn render_response_headers(req: &ProxyRequest) -> AnyView {
 }
 
 pub fn count_json_array(json: Option<&str>) -> Option<usize> {
-    json.and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
-        .and_then(|v| v.as_array().map(|a| a.len()))
+    json.and_then(|string| serde_json::from_str::<serde_json::Value>(string).ok())
+        .and_then(|value| value.as_array().map(|array| array.len()))
 }
 
 pub fn count_json_object(json: Option<&str>) -> Option<usize> {
-    json.and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
-        .and_then(|v| v.as_object().map(|o| o.len()))
+    json.and_then(|string| serde_json::from_str::<serde_json::Value>(string).ok())
+        .and_then(|value| value.as_object().map(|object| object.len()))
 }
 
 pub fn count_json_items(json: Option<&str>) -> Option<usize> {
-    json.and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
-        .and_then(|v| {
-            v.as_array()
-                .map(|a| a.len())
-                .or_else(|| v.as_object().map(|o| o.len()))
+    json.and_then(|string| serde_json::from_str::<serde_json::Value>(string).ok())
+        .and_then(|value| {
+            value
+                .as_array()
+                .map(|array| array.len())
+                .or_else(|| value.as_object().map(|object| object.len()))
         })
 }
 
@@ -110,7 +111,7 @@ pub fn build_request_subpage_defs(
             "Messages",
             req.messages_json.is_some(),
             count_json_array(req.messages_json.as_deref())
-                .map(|n| n.to_string())
+                .map(|count| count.to_string())
                 .unwrap_or_default(),
         ),
         (
@@ -118,7 +119,7 @@ pub fn build_request_subpage_defs(
             "System",
             req.system_json.is_some(),
             count_json_array(req.system_json.as_deref())
-                .map(|n| n.to_string())
+                .map(|count| count.to_string())
                 .unwrap_or_default(),
         ),
         (
@@ -126,7 +127,7 @@ pub fn build_request_subpage_defs(
             "Tools",
             req.tools_json.is_some(),
             count_json_array(req.tools_json.as_deref())
-                .map(|n| n.to_string())
+                .map(|count| count.to_string())
                 .unwrap_or_default(),
         ),
         (
@@ -134,7 +135,7 @@ pub fn build_request_subpage_defs(
             "Params",
             req.params_json.is_some(),
             count_json_object(req.params_json.as_deref())
-                .map(|n| n.to_string())
+                .map(|count| count.to_string())
                 .unwrap_or_default(),
         ),
         ("full_json", "Full JSON", true, String::new()),
@@ -143,7 +144,7 @@ pub fn build_request_subpage_defs(
             "Response SSE",
             req.response_events_json.is_some(),
             count_json_array(req.response_events_json.as_deref())
-                .map(|n| n.to_string())
+                .map(|count| count.to_string())
                 .unwrap_or_default(),
         ),
         (
@@ -151,7 +152,7 @@ pub fn build_request_subpage_defs(
             "Request Headers",
             true,
             count_json_object(req.headers_json.as_deref())
-                .map(|n| n.to_string())
+                .map(|count| count.to_string())
                 .unwrap_or_default(),
         ),
         (
@@ -159,7 +160,7 @@ pub fn build_request_subpage_defs(
             "Response Headers",
             has_response,
             count_json_object(req.response_headers_json.as_deref())
-                .map(|n| n.to_string())
+                .map(|count| count.to_string())
                 .unwrap_or_default(),
         ),
     ];
@@ -198,7 +199,7 @@ pub fn render_detail_page_content(
     filters: &[String],
     keep_tool_pairs: i64,
 ) -> DetailPageContent {
-    let truncate = query.get("truncate").map(|v| v.as_str()) != Some("off");
+    let truncate = query.get("truncate").map(|field| field.as_str()) != Some("off");
     let order = query
         .get("order")
         .cloned()
@@ -233,12 +234,12 @@ pub fn render_detail_page_content(
         "system" => req
             .system_json
             .as_deref()
-            .map(|s| render_system(s, filters))
+            .map(|json_str| render_system(json_str, filters))
             .unwrap_or_else(|| view! { <p>"No system prompt."</p> }.into_any()),
         "tools" => req
             .tools_json
             .as_deref()
-            .map(|s| render_tools(s, filters))
+            .map(|json_str| render_tools(json_str, filters))
             .unwrap_or_else(|| view! { <p>"No tools."</p> }.into_any()),
         "params" => req
             .params_json
@@ -297,9 +298,9 @@ pub fn render_detail_page_content(
         _ => None,
     };
     let total_view: AnyView = total_count
-        .map(|n| {
-            let n = n.to_string();
-            view! { <p>"Total: "{n}</p> }.into_any()
+        .map(|count| {
+            let count = count.to_string();
+            view! { <p>"Total: "{count}</p> }.into_any()
         })
         .unwrap_or_else(|| ().into_any());
 

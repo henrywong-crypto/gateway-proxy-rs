@@ -122,10 +122,10 @@ pub struct InfoRow {
 
 impl InfoRow {
     pub fn new(label: &str, value: &str) -> Self {
-        let v = value.to_string();
+        let value_string = value.to_string();
         Self {
             label: label.to_string(),
-            value: v.into_any(),
+            value: value_string.into_any(),
         }
     }
 
@@ -192,29 +192,29 @@ impl Pagination {
     }
 }
 
-pub fn pagination_nav(p: &Pagination) -> AnyView {
-    if p.total_pages <= 1 {
+pub fn pagination_nav(pagination: &Pagination) -> AnyView {
+    if pagination.total_pages <= 1 {
         return ().into_any();
     }
 
-    let info = format!("Page {} of {}", p.current_page, p.total_pages);
-    let prev = if p.current_page > 1 {
+    let info = format!("Page {} of {}", pagination.current_page, pagination.total_pages);
+    let prev = if pagination.current_page > 1 {
         let href = format!(
             "{}?page={}{}",
-            p.base_url,
-            p.current_page - 1,
-            p.extra_params
+            pagination.base_url,
+            pagination.current_page - 1,
+            pagination.extra_params
         );
         Either::Left(view! { <a href={href}>"Previous"</a> })
     } else {
         Either::Right(())
     };
-    let next = if p.current_page < p.total_pages {
+    let next = if pagination.current_page < pagination.total_pages {
         let href = format!(
             "{}?page={}{}",
-            p.base_url,
-            p.current_page + 1,
-            p.extra_params
+            pagination.base_url,
+            pagination.current_page + 1,
+            pagination.extra_params
         );
         Either::Left(view! { <a href={href}>"Next"</a> })
     } else {
@@ -264,8 +264,8 @@ impl<C: IntoView> Page<C> {
             {if !breadcrumbs.is_empty() {
                 Either::Left(view! {
                     <h1>
-                        {breadcrumbs.into_iter().enumerate().map(|(i, crumb)| {
-                            let sep = if i > 0 { " / " } else { "" };
+                        {breadcrumbs.into_iter().enumerate().map(|(index, crumb)| {
+                            let sep = if index > 0 { " / " } else { "" };
                             match crumb.href {
                                 Some(href) => Either::Left(view! {
                                     {sep}<a href={href}>{crumb.label}</a>
@@ -314,8 +314,8 @@ impl<C: IntoView> Page<C> {
                     <h2>"Subpages"</h2>
                     <table>
                         <tr><th>"Page"</th><th>"Count"</th></tr>
-                        {subpages.into_iter().map(|sp| {
-                            view! { <tr><td><a href={sp.href}>{sp.label}</a></td><td>{sp.count}</td></tr> }
+                        {subpages.into_iter().map(|subpage| {
+                            view! { <tr><td><a href={subpage.href}>{subpage.label}</a></td><td>{subpage.count}</td></tr> }
                         }).collect::<Vec<_>>()}
                     </table>
                 })

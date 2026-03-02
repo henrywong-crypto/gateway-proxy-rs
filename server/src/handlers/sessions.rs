@@ -19,19 +19,19 @@ pub async fn show_sessions_page(
 ) -> HttpResponse {
     let page: i64 = query
         .get("page")
-        .and_then(|v| v.parse().ok())
+        .and_then(|page_str| page_str.parse().ok())
         .unwrap_or(1)
         .max(1);
     let per_page: i64 = 50;
 
     let total = match db::count_sessions(pool.get_ref()).await {
-        Ok(n) => n,
+        Ok(total) => total,
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
 
     let offset = (page - 1) * per_page;
     let sessions = match db::list_sessions_paginated(pool.get_ref(), per_page, offset).await {
-        Ok(s) => s,
+        Ok(sessions) => sessions,
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
 
@@ -56,28 +56,30 @@ pub async fn create_session_post(
     form: web::Form<HashMap<String, String>>,
 ) -> HttpResponse {
     let (name, target_url) = match (form.get("name"), form.get("target_url")) {
-        (Some(n), Some(t)) if !n.is_empty() && !t.is_empty() => (n.clone(), t.clone()),
+        (Some(name), Some(target_url)) if !name.is_empty() && !target_url.is_empty() => {
+            (name.clone(), target_url.clone())
+        }
         _ => return HttpResponse::BadRequest().body("Name and target_url are required"),
     };
-    let tls_verify_disabled = form.get("tls_verify_disabled").is_some_and(|v| v == "1");
-    let auth_header = form.get("auth_header").and_then(|v| {
-        let trimmed = v.trim();
+    let tls_verify_disabled = form.get("tls_verify_disabled").is_some_and(|field| field == "1");
+    let auth_header = form.get("auth_header").and_then(|field| {
+        let trimmed = field.trim();
         if trimmed.is_empty() {
             None
         } else {
             Some(trimmed.to_string())
         }
     });
-    let x_api_key = form.get("x_api_key").and_then(|v| {
-        let trimmed = v.trim();
+    let x_api_key = form.get("x_api_key").and_then(|field| {
+        let trimmed = field.trim();
         if trimmed.is_empty() {
             None
         } else {
             Some(trimmed.to_string())
         }
     });
-    let profile_id = form.get("profile_id").and_then(|v| {
-        let trimmed = v.trim();
+    let profile_id = form.get("profile_id").and_then(|field| {
+        let trimmed = field.trim();
         if trimmed.is_empty() {
             None
         } else {
@@ -116,14 +118,14 @@ pub async fn show_session_page(
     let session_id = path.into_inner();
 
     let session = match db::get_session(pool.get_ref(), &session_id).await {
-        Ok(Some(s)) => s,
+        Ok(Some(session)) => session,
         Ok(None) => return HttpResponse::NotFound().body("Session not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
 
     let profile_name = if let Some(ref pid) = session.profile_id {
         match db::get_filter_profile(pool.get_ref(), pid).await {
-            Ok(Some(p)) => Some(p.name),
+            Ok(Some(profile)) => Some(profile.name),
             _ => None,
         }
     } else {
@@ -143,7 +145,7 @@ pub async fn show_edit_session_form(
     let session_id = path.into_inner();
 
     let session = match db::get_session(pool.get_ref(), &session_id).await {
-        Ok(Some(s)) => s,
+        Ok(Some(session)) => session,
         Ok(None) => return HttpResponse::NotFound().body("Session not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
@@ -162,28 +164,30 @@ pub async fn update_session_post(
 ) -> HttpResponse {
     let session_id = path.into_inner();
     let (name, target_url) = match (form.get("name"), form.get("target_url")) {
-        (Some(n), Some(t)) if !n.is_empty() && !t.is_empty() => (n.clone(), t.clone()),
+        (Some(name), Some(target_url)) if !name.is_empty() && !target_url.is_empty() => {
+            (name.clone(), target_url.clone())
+        }
         _ => return HttpResponse::BadRequest().body("Name and target_url are required"),
     };
-    let tls_verify_disabled = form.get("tls_verify_disabled").is_some_and(|v| v == "1");
-    let auth_header = form.get("auth_header").and_then(|v| {
-        let trimmed = v.trim();
+    let tls_verify_disabled = form.get("tls_verify_disabled").is_some_and(|field| field == "1");
+    let auth_header = form.get("auth_header").and_then(|field| {
+        let trimmed = field.trim();
         if trimmed.is_empty() {
             None
         } else {
             Some(trimmed.to_string())
         }
     });
-    let x_api_key = form.get("x_api_key").and_then(|v| {
-        let trimmed = v.trim();
+    let x_api_key = form.get("x_api_key").and_then(|field| {
+        let trimmed = field.trim();
         if trimmed.is_empty() {
             None
         } else {
             Some(trimmed.to_string())
         }
     });
-    let profile_id = form.get("profile_id").and_then(|v| {
-        let trimmed = v.trim();
+    let profile_id = form.get("profile_id").and_then(|field| {
+        let trimmed = field.trim();
         if trimmed.is_empty() {
             None
         } else {

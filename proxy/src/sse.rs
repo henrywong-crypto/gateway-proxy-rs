@@ -14,7 +14,7 @@ pub fn parse_sse_events(body: &str) -> Vec<serde_json::Value> {
         } else if line.trim().is_empty() && !current_data.is_empty() {
             // Empty line = end of event
             let data_value = match serde_json::from_str::<serde_json::Value>(&current_data) {
-                Ok(v) => v,
+                Ok(parsed) => parsed,
                 Err(_) => serde_json::Value::String(current_data.clone()),
             };
             let mut event = serde_json::Map::new();
@@ -56,10 +56,10 @@ pub fn parse_sse_events(body: &str) -> Vec<serde_json::Value> {
 pub fn extract_text_from_events(events: &[serde_json::Value]) -> String {
     let mut text = String::new();
     for event in events {
-        if let Some(delta) = event.get("data").and_then(|d| d.get("delta")) {
-            if delta.get("type").and_then(|v| v.as_str()) == Some("text_delta") {
-                if let Some(t) = delta.get("text").and_then(|v| v.as_str()) {
-                    text.push_str(t);
+        if let Some(delta) = event.get("data").and_then(|data| data.get("delta")) {
+            if delta.get("type").and_then(|field| field.as_str()) == Some("text_delta") {
+                if let Some(text_content) = delta.get("text").and_then(|field| field.as_str()) {
+                    text.push_str(text_content);
                 }
             }
         }

@@ -7,7 +7,7 @@ use templates::{Breadcrumb, InfoRow, NavLink, Page, Subpage};
 
 /// Parse webfetch_rounds_json into a Vec of round objects.
 pub fn parse_rounds(json: Option<&str>) -> Option<Vec<serde_json::Value>> {
-    json.and_then(|s| serde_json::from_str::<Vec<serde_json::Value>>(s).ok())
+    json.and_then(|json_str| serde_json::from_str::<Vec<serde_json::Value>>(json_str).ok())
 }
 
 /// Build breadcrumbs for WebFetch Intercept pages.
@@ -63,9 +63,9 @@ pub fn render_webfetch_intercept_hub(req: &ProxyRequest, session: &Session) -> S
 
         let total_count = count_json_array(req.webfetch_first_response_events_json.as_deref());
         let total_view: AnyView = total_count
-            .map(|n| {
-                let n = n.to_string();
-                view! { <p>"Total: "{n}</p> }.into_any()
+            .map(|count| {
+                let count = count.to_string();
+                view! { <p>"Total: "{count}</p> }.into_any()
             })
             .unwrap_or_else(|| ().into_any());
 
@@ -83,21 +83,21 @@ pub fn render_webfetch_intercept_hub(req: &ProxyRequest, session: &Session) -> S
     let rounds = parse_rounds(req.webfetch_rounds_json.as_deref()).unwrap_or_default();
     let agent_ids: Vec<&str> = rounds
         .iter()
-        .flat_map(|r| {
-            r.get("agent_request_ids")
-                .and_then(|v| v.as_array())
-                .map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
+        .flat_map(|round| {
+            round.get("agent_request_ids")
+                .and_then(|field| field.as_array())
+                .map(|array| array.iter().filter_map(|field| field.as_str()).collect::<Vec<_>>())
                 .unwrap_or_default()
         })
         .collect();
 
     let subpages: Vec<Subpage> = agent_ids
         .iter()
-        .map(|rid| {
-            let short = &rid[..8.min(rid.len())];
+        .map(|agent_id| {
+            let short = &agent_id[..8.min(agent_id.len())];
             Subpage::new(
                 format!("Agent Request #{}", short),
-                format!("{}/agent/{}", base, rid),
+                format!("{}/agent/{}", base, agent_id),
                 String::new(),
             )
         })

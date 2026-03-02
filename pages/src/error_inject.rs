@@ -11,7 +11,7 @@ pub fn render_error_inject_view(session: &Session) -> String {
     let is_active = !active_key.is_empty();
 
     let active_label = common::error_inject::find_by_key(&active_key)
-        .map(|e| e.label)
+        .map(|error_def| error_def.label)
         .unwrap_or("unknown");
 
     let rows: Vec<_> = ERROR_TYPES

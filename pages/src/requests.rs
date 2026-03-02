@@ -55,21 +55,21 @@ pub fn render_requests_view(
                         <th>"Response"</th>
                         <th>"Last Block"</th>
                     </tr>
-                    {requests.into_iter().map(|r| {
-                        let detail_href = format!("/_dashboard/sessions/{}/requests/{}", r.session_id, r.id);
-                        let messages_href = format!("/_dashboard/sessions/{}/requests/{}/messages", r.session_id, r.id);
-                        let sse_href = format!("/_dashboard/sessions/{}/requests/{}/response_sse", r.session_id, r.id);
-                        let (msg_count, preview) = get_message_preview(&r);
-                        let (block_count, response_summary) = get_response_summary(&r);
-                        let model = r.model.clone().unwrap_or_default();
-                        let id_str = r.id.to_string();
+                    {requests.into_iter().map(|request| {
+                        let detail_href = format!("/_dashboard/sessions/{}/requests/{}", request.session_id, request.id);
+                        let messages_href = format!("/_dashboard/sessions/{}/requests/{}/messages", request.session_id, request.id);
+                        let sse_href = format!("/_dashboard/sessions/{}/requests/{}/response_sse", request.session_id, request.id);
+                        let (msg_count, preview) = get_message_preview(&request);
+                        let (block_count, response_summary) = get_response_summary(&request);
+                        let model = request.model.clone().unwrap_or_default();
+                        let id_str = request.id.to_string();
                         view! {
                             <tr>
                                 <td><a href={detail_href}>{id_str}</a></td>
-                                <td>{r.method}</td>
-                                <td>{r.path}</td>
+                                <td>{request.method}</td>
+                                <td>{request.path}</td>
                                 <td>{model}</td>
-                                <td>{r.timestamp}</td>
+                                <td>{request.timestamp}</td>
                                 <td><a href={messages_href}>{msg_count}</a></td>
                                 <td>{preview}</td>
                                 <td><a href={sse_href}>{block_count}</a></td>
@@ -104,27 +104,29 @@ pub fn render_requests_view(
 
 /// Extract a preview string from a single content block.
 fn extract_block_preview(block: &serde_json::Value) -> String {
-    match block.get("type").and_then(|t| t.as_str()) {
+    match block.get("type").and_then(|field| field.as_str()) {
         Some("text") => block
             .get("text")
-            .and_then(|t| t.as_str())
+            .and_then(|field| field.as_str())
             .unwrap_or("")
             .to_string(),
         Some("tool_use") => format!(
             "tool_use: {}",
-            block.get("name").and_then(|n| n.as_str()).unwrap_or("")
+            block.get("name").and_then(|field| field.as_str()).unwrap_or("")
         ),
         Some("tool_result") => {
-            let content_preview = if let Some(s) = block.get("content").and_then(|c| c.as_str()) {
-                s.to_string()
-            } else if let Some(arr) = block.get("content").and_then(|c| c.as_array()) {
-                arr.iter()
-                    .filter_map(|b| {
-                        if b.get("type").and_then(|t| t.as_str()) == Some("text") {
-                            b.get("text").and_then(|t| t.as_str())
-                        } else {
-                            None
-                        }
+            let content_preview =
+                if let Some(string) = block.get("content").and_then(|field| field.as_str()) {
+                    string.to_string()
+                } else if let Some(arr) = block.get("content").and_then(|field| field.as_array()) {
+                    arr.iter()
+                        .filter_map(|element| {
+                            if element.get("type").and_then(|field| field.as_str()) == Some("text")
+                            {
+                                element.get("text").and_then(|field| field.as_str())
+                            } else {
+                                None
+                            }
                     })
                     .collect::<Vec<_>>()
                     .join(" ")
@@ -143,7 +145,7 @@ fn extract_block_preview(block: &serde_json::Value) -> String {
                 }
             }
         }
-        Some(t) => t.to_string(),
+        Some(block_type) => block_type.to_string(),
         None => String::new(),
     }
 }
@@ -161,18 +163,18 @@ fn get_message_preview(proxy_request: &ProxyRequest) -> (String, String) {
     let count = format!("{}", msgs.len());
     let last = match msgs
         .iter()
-        .rfind(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+        .rfind(|msg| msg.get("role").and_then(|field| field.as_str()) == Some("user"))
     {
-        Some(m) => m,
+        Some(msg) => msg,
         None => match msgs.last() {
-            Some(m) => m,
+            Some(msg) => msg,
             None => return (count, String::new()),
         },
     };
 
     let content = &last["content"];
-    let preview = if let Some(s) = content.as_str() {
-        s.to_string()
+    let preview = if let Some(string) = content.as_str() {
+        string.to_string()
     } else if let Some(arr) = content.as_array() {
         if let Some(block) = arr.last() {
             extract_block_preview(block)
@@ -205,44 +207,47 @@ fn accumulate_sse_block_metadata(
     let mut block_text: HashMap<i64, String> = HashMap::new();
 
     for event in sse_events {
-        let event_type = event.get("event").and_then(|e| e.as_str()).unwrap_or("");
+        let event_type = event.get("event").and_then(|field| field.as_str()).unwrap_or("");
         let data = &event["data"];
 
         match event_type {
             "content_block_start" => {
-                let index = data.get("index").and_then(|v| v.as_i64()).unwrap_or(0);
-                let btype = data
+                let index = data.get("index").and_then(|field| field.as_i64()).unwrap_or(0);
+                let block_type = data
                     .pointer("/content_block/type")
-                    .and_then(|v| v.as_str())
+                    .and_then(|field| field.as_str())
                     .unwrap_or("")
                     .to_string();
                 let name = data
                     .pointer("/content_block/name")
-                    .and_then(|v| v.as_str())
+                    .and_then(|field| field.as_str())
                     .unwrap_or("")
                     .to_string();
-                block_types.insert(index, btype);
+                block_types.insert(index, block_type);
                 if !name.is_empty() {
                     block_names.insert(index, name);
                 }
             }
             "content_block_delta" => {
-                let index = data.get("index").and_then(|v| v.as_i64()).unwrap_or(0);
+                let index = data.get("index").and_then(|field| field.as_i64()).unwrap_or(0);
                 let delta = &data["delta"];
-                let dtype = delta.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                match dtype {
+                let delta_type = delta.get("type").and_then(|field| field.as_str()).unwrap_or("");
+                match delta_type {
                     "text_delta" => {
-                        let text = delta.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                        let text = delta.get("text").and_then(|field| field.as_str()).unwrap_or("");
                         block_text.entry(index).or_default().push_str(text);
                     }
                     "thinking_delta" => {
-                        let text = delta.get("thinking").and_then(|v| v.as_str()).unwrap_or("");
+                        let text = delta
+                            .get("thinking")
+                            .and_then(|field| field.as_str())
+                            .unwrap_or("");
                         block_text.entry(index).or_default().push_str(text);
                     }
                     "input_json_delta" => {
                         let json = delta
                             .get("partial_json")
-                            .and_then(|v| v.as_str())
+                            .and_then(|field| field.as_str())
                             .unwrap_or("");
                         block_text.entry(index).or_default().push_str(json);
                     }
@@ -272,22 +277,22 @@ fn format_last_block_summary(
         return String::new();
     };
 
-    let btype = block_types.get(&index).map(|s| s.as_str()).unwrap_or("");
-    let name = block_names.get(&index).map(|s| s.as_str()).unwrap_or("");
-    let text = block_text.get(&index).map(|s| s.as_str()).unwrap_or("");
+    let block_type = block_types.get(&index).map(|string| string.as_str()).unwrap_or("");
+    let name = block_names.get(&index).map(|string| string.as_str()).unwrap_or("");
+    let text = block_text.get(&index).map(|string| string.as_str()).unwrap_or("");
 
-    match btype {
+    match block_type {
         "tool_use" => {
             let preview = text.replace('\n', " ");
             if !name.is_empty() && !preview.is_empty() {
                 let short: String = preview.chars().take(40).collect();
                 if preview.len() > 40 {
-                    format!("{}({}): {}...", btype, name, short)
+                    format!("{}({}): {}...", block_type, name, short)
                 } else {
-                    format!("{}({}): {}", btype, name, short)
+                    format!("{}({}): {}", block_type, name, short)
                 }
             } else if !name.is_empty() {
-                format!("{}({})", btype, name)
+                format!("{}({})", block_type, name)
             } else {
                 "tool_use".to_string()
             }

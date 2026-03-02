@@ -10,7 +10,7 @@ pub async fn show_intercept_page(
 ) -> HttpResponse {
     let session_id = path.into_inner();
     let session = match db::get_session(pool.get_ref(), &session_id).await {
-        Ok(Some(s)) => s,
+        Ok(Some(session)) => session,
         Ok(None) => return HttpResponse::NotFound().body("Session not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
@@ -25,7 +25,7 @@ pub async fn show_webfetch_page(
 ) -> HttpResponse {
     let session_id = path.into_inner();
     let session = match db::get_session(pool.get_ref(), &session_id).await {
-        Ok(Some(s)) => s,
+        Ok(Some(session)) => session,
         Ok(None) => return HttpResponse::NotFound().body("Session not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
@@ -44,7 +44,7 @@ pub async fn set_webfetch_intercept_post(
     HttpResponse::SeeOther()
         .insert_header((
             "Location",
-            format!("/_dashboard/sessions/{}/intercept/webfetch", session_id),
+            format!("/_dashboard/sessions/{}/tool-intercept/webfetch", session_id),
         ))
         .finish()
 }
@@ -60,7 +60,32 @@ pub async fn clear_webfetch_intercept_post(
     HttpResponse::SeeOther()
         .insert_header((
             "Location",
-            format!("/_dashboard/sessions/{}/intercept/webfetch", session_id),
+            format!("/_dashboard/sessions/{}/tool-intercept/webfetch", session_id),
+        ))
+        .finish()
+}
+
+pub async fn set_webfetch_tool_names_post(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<String>,
+    form: web::Form<HashMap<String, String>>,
+) -> HttpResponse {
+    let session_id = path.into_inner();
+    let tool_names = form.get("tool_names").map(|field| field.as_str()).unwrap_or("WebFetch");
+    let tool_names = if tool_names.trim().is_empty() {
+        "WebFetch"
+    } else {
+        tool_names
+    };
+    if let Err(e) =
+        db::set_session_webfetch_tool_names(pool.get_ref(), &session_id, tool_names).await
+    {
+        return HttpResponse::InternalServerError().body(format!("DB error: {}", e));
+    }
+    HttpResponse::SeeOther()
+        .insert_header((
+            "Location",
+            format!("/_dashboard/sessions/{}/tool-intercept/webfetch", session_id),
         ))
         .finish()
 }
@@ -71,7 +96,7 @@ pub async fn set_webfetch_whitelist_post(
     form: web::Form<HashMap<String, String>>,
 ) -> HttpResponse {
     let session_id = path.into_inner();
-    let whitelist = form.get("whitelist").map(|s| s.as_str()).unwrap_or("");
+    let whitelist = form.get("whitelist").map(|field| field.as_str()).unwrap_or("");
     let whitelist = if whitelist.trim().is_empty() {
         None
     } else {
@@ -84,7 +109,7 @@ pub async fn set_webfetch_whitelist_post(
     HttpResponse::SeeOther()
         .insert_header((
             "Location",
-            format!("/_dashboard/sessions/{}/intercept/webfetch", session_id),
+            format!("/_dashboard/sessions/{}/tool-intercept/webfetch", session_id),
         ))
         .finish()
 }
@@ -100,7 +125,7 @@ pub async fn clear_webfetch_whitelist_post(
     HttpResponse::SeeOther()
         .insert_header((
             "Location",
-            format!("/_dashboard/sessions/{}/intercept/webfetch", session_id),
+            format!("/_dashboard/sessions/{}/tool-intercept/webfetch", session_id),
         ))
         .finish()
 }
@@ -112,7 +137,7 @@ pub async fn show_approvals_page(
 ) -> HttpResponse {
     let session_id = path.into_inner();
     let session = match db::get_session(pool.get_ref(), &session_id).await {
-        Ok(Some(s)) => s,
+        Ok(Some(session)) => session,
         Ok(None) => return HttpResponse::NotFound().body("Session not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
@@ -134,7 +159,7 @@ pub async fn fail_approval_post(
     HttpResponse::SeeOther()
         .insert_header((
             "Location",
-            format!("/_dashboard/sessions/{}/intercept/approvals", session_id),
+            format!("/_dashboard/sessions/{}/tool-intercept/approvals", session_id),
         ))
         .finish()
 }
@@ -152,7 +177,7 @@ pub async fn mock_approval_post(
     HttpResponse::SeeOther()
         .insert_header((
             "Location",
-            format!("/_dashboard/sessions/{}/intercept/approvals", session_id),
+            format!("/_dashboard/sessions/{}/tool-intercept/approvals", session_id),
         ))
         .finish()
 }
@@ -170,7 +195,7 @@ pub async fn accept_approval_post(
     HttpResponse::SeeOther()
         .insert_header((
             "Location",
-            format!("/_dashboard/sessions/{}/intercept/approvals", session_id),
+            format!("/_dashboard/sessions/{}/tool-intercept/approvals", session_id),
         ))
         .finish()
 }

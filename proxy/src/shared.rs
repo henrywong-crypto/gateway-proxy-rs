@@ -28,13 +28,13 @@ pub async fn load_filters_for_profile(
         .await
         .unwrap_or_default()
         .into_iter()
-        .map(|f| f.pattern)
+        .map(|filter| filter.pattern)
         .collect();
     let tool_filters: Vec<String> = db::list_tool_filters(pool, profile_id)
         .await
         .unwrap_or_default()
         .into_iter()
-        .map(|f| f.name)
+        .map(|filter| filter.name)
         .collect();
     let keep_tool_pairs = db::get_filter_profile_keep_tool_pairs(pool, profile_id)
         .await
@@ -52,7 +52,7 @@ pub async fn get_session_or_error(
     session_id: &str,
 ) -> Result<common::models::Session, actix_web::Error> {
     match db::get_session(pool, session_id).await {
-        Ok(Some(s)) => Ok(s),
+        Ok(Some(session)) => Ok(session),
         Ok(None) => Err(ErrorNotFound(format!("Session '{}' not found", session_id))),
         Err(e) => Err(ErrorInternalServerError(format!("DB error: {}", e))),
     }
@@ -60,8 +60,8 @@ pub async fn get_session_or_error(
 
 /// Serialize an iterator of (name, value) header pairs to a pretty-printed JSON string.
 pub fn headers_to_json(headers: impl Iterator<Item = (String, String)>) -> anyhow::Result<String> {
-    let map: HashMap<String, String> = headers.collect();
-    Ok(serde_json::to_string_pretty(&map)?)
+    let headers_map: HashMap<String, String> = headers.collect();
+    Ok(serde_json::to_string_pretty(&headers_map)?)
 }
 
 /// Fields extracted from a JSON request body.
@@ -87,19 +87,19 @@ pub fn extract_request_fields(
 
     let model = data
         .get("model")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
+        .and_then(|field| field.as_str())
+        .map(|string| string.to_string())
         .or(model_override);
 
     let tools_json = data
         .get("tools")
-        .filter(|v| v.is_array())
+        .filter(|field| field.is_array())
         .map(serde_json::to_string)
         .transpose()?;
 
     let messages_json = data
         .get("messages")
-        .filter(|v| v.is_array())
+        .filter(|field| field.is_array())
         .map(serde_json::to_string)
         .transpose()?;
 
@@ -108,19 +108,19 @@ pub fn extract_request_fields(
         .map(serde_json::to_string_pretty)
         .transpose()?;
 
-    let other: serde_json::Map<String, Value> = data
+    let other_params: serde_json::Map<String, Value> = data
         .as_object()
         .map(|obj| {
             obj.iter()
-                .filter(|(k, _)| !matches!(k.as_str(), "tools" | "messages" | "system"))
-                .map(|(k, v)| (k.clone(), v.clone()))
+                .filter(|(key, _)| !matches!(key.as_str(), "tools" | "messages" | "system"))
+                .map(|(key, value)| (key.clone(), value.clone()))
                 .collect()
         })
         .unwrap_or_default();
-    let params_json = if other.is_empty() {
+    let params_json = if other_params.is_empty() {
         None
     } else {
-        Some(serde_json::to_string_pretty(&Value::Object(other))?)
+        Some(serde_json::to_string_pretty(&Value::Object(other_params))?)
     };
 
     Ok(ParsedRequestBody {
@@ -219,13 +219,15 @@ pub fn forward_response_headers(
     upstream_headers: &reqwest::header::HeaderMap,
 ) {
     for (key, value) in upstream_headers {
-        let k = key.as_str().to_lowercase();
-        if k == "transfer-encoding" || k == "content-encoding" {
+        let header_name_lower = key.as_str().to_lowercase();
+        if header_name_lower == "transfer-encoding" || header_name_lower == "content-encoding" {
             continue;
         }
         if let Ok(name) = actix_web::http::header::HeaderName::from_bytes(key.as_ref()) {
-            if let Ok(val) = actix_web::http::header::HeaderValue::from_bytes(value.as_bytes()) {
-                builder.insert_header((name, val));
+            if let Ok(header_value) =
+                actix_web::http::header::HeaderValue::from_bytes(value.as_bytes())
+            {
+                builder.insert_header((name, header_value));
             }
         }
     }
@@ -259,7 +261,7 @@ pub fn actix_headers_iter(
 ) -> impl Iterator<Item = (String, String)> + '_ {
     req.headers()
         .iter()
-        .filter_map(|(k, v)| v.to_str().ok().map(|s| (k.to_string(), s.to_string())))
+        .filter_map(|(key, value)| value.to_str().ok().map(|string| (key.to_string(), string.to_string())))
 }
 
 /// Build the full target URL from a session's base URL, the request path, and
@@ -297,28 +299,31 @@ pub fn build_forward_headers(
     auth_header: Option<&str>,
     x_api_key: Option<&str>,
 ) -> reqwest::header::HeaderMap {
-    let mut map = reqwest::header::HeaderMap::new();
+    let mut header_map = reqwest::header::HeaderMap::new();
     for (key, value) in req.headers() {
         if key.as_str().eq_ignore_ascii_case("host") {
             continue;
         }
         if let Ok(name) = reqwest::header::HeaderName::from_bytes(key.as_ref()) {
-            if let Ok(val) = reqwest::header::HeaderValue::from_bytes(value.as_bytes()) {
-                map.insert(name, val);
+            if let Ok(header_value) = reqwest::header::HeaderValue::from_bytes(value.as_bytes()) {
+                header_map.insert(name, header_value);
             }
         }
     }
     if let Some(auth_value) = auth_header {
-        if let Ok(val) = reqwest::header::HeaderValue::from_str(auth_value) {
-            map.insert(reqwest::header::AUTHORIZATION, val);
+        if let Ok(header_value) = reqwest::header::HeaderValue::from_str(auth_value) {
+            header_map.insert(reqwest::header::AUTHORIZATION, header_value);
         }
     }
     if let Some(key_value) = x_api_key {
-        if let Ok(val) = reqwest::header::HeaderValue::from_str(key_value) {
-            map.insert(reqwest::header::HeaderName::from_static("x-api-key"), val);
+        if let Ok(header_value) = reqwest::header::HeaderValue::from_str(key_value) {
+            header_map.insert(
+                reqwest::header::HeaderName::from_static("x-api-key"),
+                header_value,
+            );
         }
     }
-    map
+    header_map
 }
 
 /// Parse the request body and extract fields for DB logging.

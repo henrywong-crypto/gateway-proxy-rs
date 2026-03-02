@@ -41,8 +41,8 @@ fn collect_webfetch_names(session: &common::models::Session) -> Vec<String> {
         session
             .webfetch_tool_names
             .lines()
-            .map(|l| l.trim().to_string())
-            .filter(|l| !l.is_empty())
+            .map(|line| line.trim().to_string())
+            .filter(|line| !line.is_empty())
             .collect()
     } else {
         vec![]
@@ -184,11 +184,11 @@ pub async fn proxy_handler(
     let req_headers_json =
         headers_to_json(actix_headers_iter(&req)).map_err(ErrorInternalServerError)?;
     let url_model = {
-        let parts: Vec<&str> = full_path.split('/').collect();
-        parts
+        let path_segments: Vec<&str> = full_path.split('/').collect();
+        path_segments
             .iter()
-            .position(|&p| p == "model")
-            .and_then(|pos| parts.get(pos + 1).map(|s| s.to_string()))
+            .position(|&segment| segment == "model")
+            .and_then(|pos| path_segments.get(pos + 1).map(|segment| segment.to_string()))
     };
     let (fields, note) = parse_body_fields(&body, url_model).map_err(ErrorInternalServerError)?;
     let request_id = log_request(
@@ -264,8 +264,8 @@ pub async fn proxy_handler(
             .as_deref()
             .unwrap_or("")
             .lines()
-            .map(|l| l.trim().to_string())
-            .filter(|l| !l.is_empty())
+            .map(|line| line.trim().to_string())
+            .filter(|line| !line.is_empty())
             .collect();
 
         if let Some(result) = webfetch::maybe_intercept(&webfetch::InterceptParams {

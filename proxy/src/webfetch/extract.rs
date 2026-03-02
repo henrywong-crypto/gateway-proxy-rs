@@ -34,20 +34,20 @@ pub(super) fn is_all_whitelisted(
     if whitelist.is_empty() || tool_uses.is_empty() {
         return false;
     }
-    tool_uses.iter().all(|tu| {
-        if !webfetch_names.iter().any(|n| n == &tu.name) {
+    tool_uses.iter().all(|tool_use| {
+        if !webfetch_names.iter().any(|name| name == &tool_use.name) {
             return false;
         }
-        let url_str = match tu.input.get("url").and_then(|v| v.as_str()) {
-            Some(u) => u,
+        let url_str = match tool_use.input.get("url").and_then(|field| field.as_str()) {
+            Some(url) => url,
             None => return false,
         };
         let parsed = match url::Url::parse(url_str) {
-            Ok(u) => u,
+            Ok(url) => url,
             Err(_) => return false,
         };
         let host = match parsed.host_str() {
-            Some(h) => h,
+            Some(host) => host,
             None => return false,
         };
         matches_whitelist_host(host, whitelist)
@@ -60,15 +60,16 @@ pub(super) fn extract_webfetch_from_sse(
     events: &[Value],
     webfetch_names: &[String],
 ) -> Option<InterceptedTools> {
-    let stop_reason = events.iter().find_map(|e| {
-        if e.get("event").and_then(|v| v.as_str()) != Some("message_delta") {
+    let stop_reason = events.iter().find_map(|event| {
+        if event.get("event").and_then(|field| field.as_str()) != Some("message_delta") {
             return None;
         }
-        e.get("data")
-            .and_then(|d| d.get("delta"))
-            .and_then(|d| d.get("stop_reason"))
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
+        event
+            .get("data")
+            .and_then(|data| data.get("delta"))
+            .and_then(|delta| delta.get("stop_reason"))
+            .and_then(|field| field.as_str())
+            .map(|string| string.to_string())
     });
 
     // Reconstruct all content blocks from SSE events
@@ -80,12 +81,12 @@ pub(super) fn extract_webfetch_from_sse(
     let mut signature_accum = String::new();
 
     for event in events {
-        let event_type = match event.get("event").and_then(|v| v.as_str()) {
-            Some(t) => t,
+        let event_type = match event.get("event").and_then(|field| field.as_str()) {
+            Some(event_type) => event_type,
             None => continue,
         };
         let data = match event.get("data") {
-            Some(d) => d,
+            Some(data) => data,
             None => continue,
         };
 
@@ -99,28 +100,29 @@ pub(super) fn extract_webfetch_from_sse(
             }
             "content_block_delta" => {
                 if let Some(delta) = data.get("delta") {
-                    let delta_type = delta.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                    let delta_type = delta.get("type").and_then(|field| field.as_str()).unwrap_or("");
                     match delta_type {
                         "text_delta" => {
-                            if let Some(text) = delta.get("text").and_then(|v| v.as_str()) {
+                            if let Some(text) = delta.get("text").and_then(|field| field.as_str()) {
                                 text_accum.push_str(text);
                             }
                         }
                         "input_json_delta" => {
                             if let Some(json_part) =
-                                delta.get("partial_json").and_then(|v| v.as_str())
+                                delta.get("partial_json").and_then(|field| field.as_str())
                             {
                                 json_accum.push_str(json_part);
                             }
                         }
                         "thinking_delta" => {
-                            if let Some(text) = delta.get("thinking").and_then(|v| v.as_str()) {
+                            if let Some(text) = delta.get("thinking").and_then(|field| field.as_str()) {
                                 thinking_accum.push_str(text);
                             }
                         }
                         "signature_delta" => {
-                            if let Some(sig) = delta.get("signature").and_then(|v| v.as_str()) {
-                                signature_accum.push_str(sig);
+                            if let Some(signature) =
+                                delta.get("signature").and_then(|field| field.as_str()) {
+                                signature_accum.push_str(signature);
                             }
                         }
                         _ => {}
@@ -131,7 +133,7 @@ pub(super) fn extract_webfetch_from_sse(
                 if let Some(mut block) = current_block.take() {
                     let block_type = block
                         .get("type")
-                        .and_then(|v| v.as_str())
+                        .and_then(|field| field.as_str())
                         .unwrap_or("")
                         .to_string();
                     match block_type.as_str() {
@@ -165,14 +167,14 @@ pub(super) fn extract_webfetch_from_sse(
             let tool_uses: Vec<ToolUse> = content_blocks
                 .iter()
                 .filter_map(|block| {
-                    if block.get("type").and_then(|v| v.as_str()) != Some("tool_use") {
+                    if block.get("type").and_then(|field| field.as_str()) != Some("tool_use") {
                         return None;
                     }
-                    let name = block.get("name").and_then(|v| v.as_str())?.to_string();
-                    if !webfetch_names.iter().any(|n| n == &name) {
+                    let name = block.get("name").and_then(|field| field.as_str())?.to_string();
+                    if !webfetch_names.iter().any(|webfetch_name| webfetch_name == &name) {
                         return None;
                     }
-                    let id = block.get("id").and_then(|v| v.as_str())?.to_string();
+                    let id = block.get("id").and_then(|field| field.as_str())?.to_string();
                     let input = block.get("input").cloned().unwrap_or(serde_json::json!({}));
                     Some(ToolUse { id, name, input })
                 })
@@ -196,7 +198,7 @@ pub(super) fn build_input_summary(tool_use: &ToolUse) -> String {
     let url = tool_use
         .input
         .get("url")
-        .and_then(|v| v.as_str())
+        .and_then(|field| field.as_str())
         .unwrap_or("<unknown>");
     format!("URL: {}", url)
 }
@@ -214,7 +216,7 @@ pub(super) fn build_followup_body(
     // Build updated messages array: original messages + assistant message + user tool_results
     let mut messages: Vec<Value> = original_body
         .get("messages")
-        .and_then(|v| v.as_array())
+        .and_then(|field| field.as_array())
         .cloned()
         .unwrap_or_default();
 
@@ -239,13 +241,13 @@ pub(super) fn build_followup_body(
 /// Remove unmatched tool_use blocks from content, keeping only blocks whose
 /// IDs appear in the given tool_uses list.
 pub(super) fn retain_matched_tool_blocks(content_blocks: &mut Vec<Value>, tool_uses: &[ToolUse]) {
-    let kept_ids: HashSet<&str> = tool_uses.iter().map(|t| t.id.as_str()).collect();
+    let kept_ids: HashSet<&str> = tool_uses.iter().map(|tool_use| tool_use.id.as_str()).collect();
     content_blocks.retain(|block| {
-        let block_type = block.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        let block_type = block.get("type").and_then(|field| field.as_str()).unwrap_or("");
         if block_type != "tool_use" {
             return true;
         }
-        let id = block.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        let id = block.get("id").and_then(|field| field.as_str()).unwrap_or("");
         kept_ids.contains(id)
     });
 }

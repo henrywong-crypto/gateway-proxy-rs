@@ -26,21 +26,21 @@ pub fn render_filters_view(profiles: &[FilterProfile]) -> String {
                         <th>"Created"</th>
                         <th></th>
                     </tr>
-                    {profiles.into_iter().map(|p| {
-                        let pid = p.id.to_string();
-                        let href = format!("/_dashboard/filters/{}", pid);
-                        let delete_action = format!("/_dashboard/filters/{}/delete", pid);
-                        let is_default = p.is_default;
+                    {profiles.into_iter().map(|profile| {
+                        let profile_id = profile.id.to_string();
+                        let href = format!("/_dashboard/filters/{}", profile_id);
+                        let delete_action = format!("/_dashboard/filters/{}/delete", profile_id);
+                        let is_default = profile.is_default;
                         let name_display = if is_default {
-                            format!("{} (default)", p.name)
+                            format!("{} (default)", profile.name)
                         } else {
-                            p.name.clone()
+                            profile.name.clone()
                         };
                         view! {
                             <tr>
-                                <td><a href={href}>{pid}</a></td>
+                                <td><a href={href}>{profile_id}</a></td>
                                 <td>{name_display}</td>
-                                <td>{p.created_at.clone().unwrap_or_default()}</td>
+                                <td>{profile.created_at.clone().unwrap_or_default()}</td>
                                 <td>
                                     {if !is_default {
                                         Either::Left(view! {
@@ -232,15 +232,15 @@ pub fn render_system_filters_view(
                         <th>"Created"</th>
                         <th></th>
                     </tr>
-                    {system_filters.into_iter().map(|f| {
-                        let edit_href = format!("/_dashboard/filters/{}/system/{}/edit", profile_id, f.id);
-                        let delete_action = format!("/_dashboard/filters/{}/system/{}/delete", profile_id, f.id);
-                        let id_str = f.id.to_string();
+                    {system_filters.into_iter().map(|filter| {
+                        let edit_href = format!("/_dashboard/filters/{}/system/{}/edit", profile_id, filter.id);
+                        let delete_action = format!("/_dashboard/filters/{}/system/{}/delete", profile_id, filter.id);
+                        let id_str = filter.id.to_string();
                         view! {
                             <tr>
                                 <td>{id_str}</td>
-                                <td>{f.pattern}</td>
-                                <td>{f.created_at.clone().unwrap_or_default()}</td>
+                                <td>{filter.pattern}</td>
+                                <td>{filter.created_at.clone().unwrap_or_default()}</td>
                                 <td>
                                     <a href={edit_href}>"Edit"</a>
                                     " "
@@ -289,10 +289,10 @@ pub fn render_new_system_filter_form(
     let profile_id = profile.id.to_string();
     let form_action = format!("/_dashboard/filters/{}/system", profile_id);
 
-    let existing_patterns: Vec<String> = system_filters.iter().map(|f| f.pattern.clone()).collect();
+    let existing_patterns: Vec<String> = system_filters.iter().map(|filter| filter.pattern.clone()).collect();
     let system_suggestions: Vec<&&str> = DEFAULT_SYSTEM_FILTER_SUGGESTIONS
         .iter()
-        .filter(|s| !existing_patterns.contains(&s.to_string()))
+        .filter(|suggestion| !existing_patterns.contains(&suggestion.to_string()))
         .collect();
     let has_suggestions = !system_suggestions.is_empty();
 
@@ -314,8 +314,8 @@ pub fn render_new_system_filter_form(
             Either::Left(view! {
                 <h2>"Suggested System Filters"</h2>
                 <table>
-                    {system_suggestions.into_iter().map(|s| {
-                        let pattern = s.to_string();
+                    {system_suggestions.into_iter().map(|suggestion| {
+                        let pattern = suggestion.to_string();
                         view! {
                             <tr>
                                 <td><code>{pattern.clone()}</code></td>
@@ -381,15 +381,15 @@ pub fn render_tool_filters_view(profile: &FilterProfile, tool_filters: &[ToolFil
                         <th>"Created"</th>
                         <th></th>
                     </tr>
-                    {tool_filters.into_iter().map(|f| {
-                        let edit_href = format!("/_dashboard/filters/{}/tools/{}/edit", profile_id, f.id);
-                        let delete_action = format!("/_dashboard/filters/{}/tools/{}/delete", profile_id, f.id);
-                        let id_str = f.id.to_string();
+                    {tool_filters.into_iter().map(|filter| {
+                        let edit_href = format!("/_dashboard/filters/{}/tools/{}/edit", profile_id, filter.id);
+                        let delete_action = format!("/_dashboard/filters/{}/tools/{}/delete", profile_id, filter.id);
+                        let id_str = filter.id.to_string();
                         view! {
                             <tr>
                                 <td>{id_str}</td>
-                                <td>{f.name}</td>
-                                <td>{f.created_at.clone().unwrap_or_default()}</td>
+                                <td>{filter.name}</td>
+                                <td>{filter.created_at.clone().unwrap_or_default()}</td>
                                 <td>
                                     <a href={edit_href}>"Edit"</a>
                                     " "
@@ -435,10 +435,10 @@ pub fn render_new_tool_filter_form(profile: &FilterProfile, tool_filters: &[Tool
     let profile_id = profile.id.to_string();
     let form_action = format!("/_dashboard/filters/{}/tools", profile_id);
 
-    let existing_names: Vec<String> = tool_filters.iter().map(|f| f.name.clone()).collect();
+    let existing_names: Vec<String> = tool_filters.iter().map(|filter| filter.name.clone()).collect();
     let tool_suggestions: Vec<&&str> = DEFAULT_TOOL_FILTER_SUGGESTIONS
         .iter()
-        .filter(|s| !existing_names.contains(&s.to_string()))
+        .filter(|suggestion| !existing_names.contains(&suggestion.to_string()))
         .collect();
     let has_suggestions = !tool_suggestions.is_empty();
 
@@ -460,8 +460,8 @@ pub fn render_new_tool_filter_form(profile: &FilterProfile, tool_filters: &[Tool
             Either::Left(view! {
                 <h2>"Suggested Tool Filters"</h2>
                 <table>
-                    {tool_suggestions.into_iter().map(|s| {
-                        let name = s.to_string();
+                    {tool_suggestions.into_iter().map(|suggestion| {
+                        let name = suggestion.to_string();
                         view! {
                             <tr>
                                 <td><code>{name.clone()}</code></td>

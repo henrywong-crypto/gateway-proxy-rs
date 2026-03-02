@@ -93,8 +93,8 @@ async fn wait_for_approval(
     let (tx, rx) = tokio::sync::oneshot::channel();
     let approval_id = uuid::Uuid::new_v4().to_string();
     {
-        let mut map = approval_queue.lock().unwrap();
-        map.insert(
+        let mut queue_map = approval_queue.lock().unwrap();
+        queue_map.insert(
             approval_id.clone(),
             PendingApproval {
                 session_id: session_id.to_string(),
@@ -105,17 +105,17 @@ async fn wait_for_approval(
     }
 
     match tokio::time::timeout(std::time::Duration::from_secs(APPROVAL_TIMEOUT_SECS), rx).await {
-        Ok(Ok(d)) => {
-            let label = match d {
+        Ok(Ok(decision)) => {
+            let label = match decision {
                 ApprovalDecision::Accept => "Accept",
                 ApprovalDecision::Fail => "Fail",
                 ApprovalDecision::Mock => "Mock",
             };
-            (d, label)
+            (decision, label)
         }
         _ => {
-            let mut map = approval_queue.lock().unwrap();
-            map.remove(&approval_id);
+            let mut queue_map = approval_queue.lock().unwrap();
+            queue_map.remove(&approval_id);
             log::info!("WebFetch interception: approval timed out, auto-failing");
             (ApprovalDecision::Fail, "Timeout (auto-fail)")
         }
@@ -207,7 +207,7 @@ async fn build_tool_results(
         ApprovalDecision::Mock => {
             let results: Vec<Value> = tool_uses
                 .iter()
-                .map(|tu| build_mock_result(tu, &config.webfetch_mock_prompt))
+                .map(|tool_use| build_mock_result(tool_use, &config.webfetch_mock_prompt))
                 .collect();
             let ids = vec![None; results.len()];
             (results, ids)
@@ -233,7 +233,7 @@ async fn send_followup_request(
     followup_body: &Value,
 ) -> Option<(u16, reqwest::header::HeaderMap, bytes::Bytes)> {
     let followup_bytes = match serde_json::to_vec(followup_body) {
-        Ok(v) => v,
+        Ok(serialized) => serialized,
         Err(e) => {
             log::warn!(
                 "WebFetch interception: failed to serialize follow-up body: {}",
@@ -250,7 +250,7 @@ async fn send_followup_request(
         .send()
         .await
     {
-        Ok(r) => r,
+        Ok(response) => response,
         Err(e) => {
             log::warn!("WebFetch interception: follow-up request failed: {}", e);
             return None;
@@ -261,7 +261,7 @@ async fn send_followup_request(
     let response_headers = followup_response.headers().clone();
 
     let body = match followup_response.bytes().await {
-        Ok(b) => b,
+        Ok(body_bytes) => body_bytes,
         Err(e) => {
             log::warn!(
                 "WebFetch interception: failed to read follow-up response: {}",
@@ -291,7 +291,7 @@ fn build_intercept_note(all_tool_names: &[String], round_count: usize) -> String
 fn serialize_rounds(rounds: &[RoundData]) -> Option<(String, String)> {
     // First round's followup body for backward compatibility
     let followup_body_json_str = match serde_json::to_string_pretty(&rounds[0].followup_body) {
-        Ok(v) => v,
+        Ok(serialized) => serialized,
         Err(e) => {
             log::warn!(
                 "WebFetch interception: failed to serialize follow-up body: {}",
@@ -304,15 +304,15 @@ fn serialize_rounds(rounds: &[RoundData]) -> Option<(String, String)> {
     // Serialize all rounds to JSON
     let rounds_value: Vec<Value> = rounds
         .iter()
-        .map(|r| {
+        .map(|round| {
             serde_json::json!({
-                "decision": r.decision,
-                "tool_names": r.tool_names,
-                "request_id": r.request_id,
-                "agent_request_ids": r.agent_request_ids,
-                "followup_body": r.followup_body,
-                "response_body": r.response_body,
-                "response_events": r.response_events,
+                "decision": round.decision,
+                "tool_names": round.tool_names,
+                "request_id": round.request_id,
+                "agent_request_ids": round.agent_request_ids,
+                "followup_body": round.followup_body,
+                "response_body": round.response_body,
+                "response_events": round.response_events,
             })
         })
         .collect();
@@ -355,7 +355,7 @@ pub async fn maybe_intercept(params: &InterceptParams<'_>) -> Option<InterceptRe
     retain_matched_tool_blocks(&mut content_blocks, &tool_uses);
 
     let original_json: Value = match serde_json::from_slice(original_body) {
-        Ok(v) => v,
+        Ok(parsed) => parsed,
         Err(e) => {
             log::warn!(
                 "WebFetch interception: failed to parse original body: {}",
@@ -396,8 +396,8 @@ pub async fn maybe_intercept(params: &InterceptParams<'_>) -> Option<InterceptRe
 
     for round_idx in 0..MAX_INTERCEPT_ROUNDS {
         let intercepted_tools: Vec<&str> =
-            current_tool_uses.iter().map(|t| t.name.as_str()).collect();
-        all_tool_names.extend(intercepted_tools.iter().map(|s| s.to_string()));
+            current_tool_uses.iter().map(|tool_use| tool_use.name.as_str()).collect();
+        all_tool_names.extend(intercepted_tools.iter().map(|string| string.to_string()));
 
         log::info!(
             "WebFetch interception round {}: {} — waiting for user approval",
@@ -408,9 +408,9 @@ pub async fn maybe_intercept(params: &InterceptParams<'_>) -> Option<InterceptRe
         // Build tool info for the UI
         let tools_info: Vec<PendingToolInfo> = current_tool_uses
             .iter()
-            .map(|t| PendingToolInfo {
-                name: t.name.clone(),
-                input_summary: build_input_summary(t),
+            .map(|tool_use| PendingToolInfo {
+                name: tool_use.name.clone(),
+                input_summary: build_input_summary(tool_use),
             })
             .collect();
 
@@ -464,7 +464,7 @@ pub async fn maybe_intercept(params: &InterceptParams<'_>) -> Option<InterceptRe
 
         rounds.push(RoundData {
             decision: decision_label.to_string(),
-            tool_names: current_tool_uses.iter().map(|t| t.name.clone()).collect(),
+            tool_names: current_tool_uses.iter().map(|tool_use| tool_use.name.clone()).collect(),
             request_id: round_request_id,
             agent_request_ids,
             followup_body: followup_body.clone(),
@@ -666,8 +666,8 @@ mod tests {
         let queue = new_approval_queue();
         let (tx, rx) = oneshot::channel();
         {
-            let mut map = queue.lock().unwrap();
-            map.insert(
+            let mut queue_map = queue.lock().unwrap();
+            queue_map.insert(
                 "approval_1".to_string(),
                 PendingApproval {
                     session_id: "sess_a".to_string(),

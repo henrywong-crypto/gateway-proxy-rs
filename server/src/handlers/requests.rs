@@ -9,29 +9,29 @@ pub async fn show_requests_page(
     query: web::Query<HashMap<String, String>>,
 ) -> HttpResponse {
     let session_id = path.into_inner();
-    let auto_refresh = query.get("refresh").map(|v| v.as_str()) == Some("on");
+    let auto_refresh = query.get("refresh").map(|field| field.as_str()) == Some("on");
     let page: i64 = query
         .get("page")
-        .and_then(|v| v.parse().ok())
+        .and_then(|page_str| page_str.parse().ok())
         .unwrap_or(1)
         .max(1);
     let per_page: i64 = 50;
 
     let session = match db::get_session(pool.get_ref(), &session_id).await {
-        Ok(Some(s)) => s,
+        Ok(Some(session)) => session,
         Ok(None) => return HttpResponse::NotFound().body("Session not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
 
     let total = match db::count_requests(pool.get_ref(), &session_id).await {
-        Ok(n) => n,
+        Ok(total) => total,
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
 
     let offset = (page - 1) * per_page;
     let requests =
         match db::list_requests_paginated(pool.get_ref(), &session_id, per_page, offset).await {
-            Ok(r) => r,
+            Ok(requests) => requests,
             Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
         };
 
@@ -52,16 +52,16 @@ pub async fn show_request_detail_page(
     pool: web::Data<SqlitePool>,
     path: web::Path<(String, String)>,
 ) -> HttpResponse {
-    let (session_id, req_id) = path.into_inner();
+    let (session_id, request_id) = path.into_inner();
 
     let session = match db::get_session(pool.get_ref(), &session_id).await {
-        Ok(Some(s)) => s,
+        Ok(Some(session)) => session,
         Ok(None) => return HttpResponse::NotFound().body("Session not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
 
-    let request = match db::get_request(pool.get_ref(), &req_id).await {
-        Ok(Some(r)) => r,
+    let request = match db::get_request(pool.get_ref(), &request_id).await {
+        Ok(Some(request)) => request,
         Ok(None) => return HttpResponse::NotFound().body("Request not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
@@ -75,16 +75,16 @@ pub async fn show_request_detail_subpage(
     path: web::Path<(String, String, String)>,
     query: web::Query<HashMap<String, String>>,
 ) -> HttpResponse {
-    let (session_id, req_id, page) = path.into_inner();
+    let (session_id, request_id, page) = path.into_inner();
 
     let session = match db::get_session(pool.get_ref(), &session_id).await {
-        Ok(Some(s)) => s,
+        Ok(Some(session)) => session,
         Ok(None) => return HttpResponse::NotFound().body("Session not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
 
-    let request = match db::get_request(pool.get_ref(), &req_id).await {
-        Ok(Some(r)) => r,
+    let request = match db::get_request(pool.get_ref(), &request_id).await {
+        Ok(Some(request)) => request,
         Ok(None) => return HttpResponse::NotFound().body("Request not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
@@ -97,13 +97,13 @@ pub async fn show_request_detail_subpage(
             .await
             .unwrap_or_default()
             .into_iter()
-            .map(|f| f.pattern)
+            .map(|filter| filter.pattern)
             .collect(),
         "tools" => db::list_tool_filters(pool.get_ref(), &profile_id)
             .await
             .unwrap_or_default()
             .into_iter()
-            .map(|f| f.name)
+            .map(|filter| filter.name)
             .collect(),
         _ => Vec::new(),
     };

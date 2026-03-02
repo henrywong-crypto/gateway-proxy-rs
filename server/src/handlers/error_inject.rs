@@ -8,7 +8,7 @@ pub async fn show_error_inject_page(
 ) -> HttpResponse {
     let session_id = path.into_inner();
     let session = match db::get_session(pool.get_ref(), &session_id).await {
-        Ok(Some(s)) => s,
+        Ok(Some(session)) => session,
         Ok(None) => return HttpResponse::NotFound().body("Session not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
@@ -22,7 +22,7 @@ pub async fn set_error_inject_post(
     form: web::Form<HashMap<String, String>>,
 ) -> HttpResponse {
     let session_id = path.into_inner();
-    let error_type = form.get("error_type").map(|s| s.as_str()).unwrap_or("");
+    let error_type = form.get("error_type").map(|field| field.as_str()).unwrap_or("");
     if let Err(e) =
         db::set_session_error_inject(pool.get_ref(), &session_id, Some(error_type)).await
     {

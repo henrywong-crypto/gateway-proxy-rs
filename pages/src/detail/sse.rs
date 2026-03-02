@@ -15,18 +15,18 @@ fn accumulate_sse_block_state(
 ) {
     match event_type {
         "content_block_start" => {
-            let index = data.get("index").and_then(|v| v.as_i64()).unwrap_or(0);
-            let btype = data
+            let index = data.get("index").and_then(|field| field.as_i64()).unwrap_or(0);
+            let block_type = data
                 .pointer("/content_block/type")
-                .and_then(|v| v.as_str())
+                .and_then(|field| field.as_str())
                 .unwrap_or("")
                 .to_string();
             let name = data
                 .pointer("/content_block/name")
-                .and_then(|v| v.as_str())
+                .and_then(|field| field.as_str())
                 .unwrap_or("")
                 .to_string();
-            block_types.insert(index, btype);
+            block_types.insert(index, block_type);
             if !name.is_empty() {
                 block_names.insert(index, name);
             }
@@ -34,22 +34,22 @@ fn accumulate_sse_block_state(
             block_json.remove(&index);
         }
         "content_block_delta" => {
-            let index = data.get("index").and_then(|v| v.as_i64()).unwrap_or(0);
+            let index = data.get("index").and_then(|field| field.as_i64()).unwrap_or(0);
             let delta = &data["delta"];
-            let dtype = delta.get("type").and_then(|v| v.as_str()).unwrap_or("");
-            match dtype {
+            let delta_type = delta.get("type").and_then(|field| field.as_str()).unwrap_or("");
+            match delta_type {
                 "text_delta" => {
-                    let text = delta.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                    let text = delta.get("text").and_then(|field| field.as_str()).unwrap_or("");
                     block_text.entry(index).or_default().push_str(text);
                 }
                 "thinking_delta" => {
-                    let text = delta.get("thinking").and_then(|v| v.as_str()).unwrap_or("");
+                    let text = delta.get("thinking").and_then(|field| field.as_str()).unwrap_or("");
                     block_text.entry(index).or_default().push_str(text);
                 }
                 "input_json_delta" => {
                     let json = delta
                         .get("partial_json")
-                        .and_then(|v| v.as_str())
+                        .and_then(|field| field.as_str())
                         .unwrap_or("");
                     block_json.entry(index).or_default().push_str(json);
                 }
@@ -68,13 +68,13 @@ fn render_sse_block_summary(
     block_text: &HashMap<i64, String>,
     index: i64,
 ) -> AnyView {
-    let btype = block_types.get(&index).map(|s| s.as_str()).unwrap_or("");
-    let name = block_names.get(&index).map(|s| s.as_str()).unwrap_or("");
+    let block_type = block_types.get(&index).map(|string| string.as_str()).unwrap_or("");
+    let name = block_names.get(&index).map(|string| string.as_str()).unwrap_or("");
 
     let label = if !name.is_empty() {
-        format!("{} — {}", btype, name)
+        format!("{} — {}", block_type, name)
     } else {
-        btype.to_string()
+        block_type.to_string()
     };
 
     let content: AnyView = if let Some(json_str) = block_json.get(&index) {
@@ -112,8 +112,8 @@ pub fn render_response_sse(req: &ProxyRequest) -> AnyView {
 
             let mut rows: Vec<AnyView> = Vec::new();
 
-            for (i, event) in sse_events.iter().enumerate() {
-                let event_type = event.get("event").and_then(|e| e.as_str()).unwrap_or("");
+            for (event_index, event) in sse_events.iter().enumerate() {
+                let event_type = event.get("event").and_then(|field| field.as_str()).unwrap_or("");
                 let data = &event["data"];
 
                 accumulate_sse_block_state(
@@ -127,12 +127,12 @@ pub fn render_response_sse(req: &ProxyRequest) -> AnyView {
 
                 let summary = summarize_sse_event(event_type, data);
                 let raw = serde_json::to_string_pretty(data).unwrap_or_default();
-                let idx = (i + 1).to_string();
+                let event_number = (event_index + 1).to_string();
                 let event_type_str = event_type.to_string();
                 rows.push(
                     view! {
                         <tr>
-                            <td>{idx}</td>
+                            <td>{event_number}</td>
                             <td>{event_type_str}</td>
                             <td>{summary}</td>
                             <td>
@@ -148,7 +148,7 @@ pub fn render_response_sse(req: &ProxyRequest) -> AnyView {
 
                 // Insert summary row after content_block_stop
                 if event_type == "content_block_stop" {
-                    let index = data.get("index").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let index = data.get("index").and_then(|field| field.as_i64()).unwrap_or(0);
                     rows.push(render_sse_block_summary(
                         &block_types,
                         &block_names,
@@ -181,15 +181,15 @@ pub fn render_response_sse(req: &ProxyRequest) -> AnyView {
 fn summarize_message_start(data: &serde_json::Value) -> String {
     let model = data
         .pointer("/message/model")
-        .and_then(|v| v.as_str())
+        .and_then(|field| field.as_str())
         .unwrap_or("");
     let role = data
         .pointer("/message/role")
-        .and_then(|v| v.as_str())
+        .and_then(|field| field.as_str())
         .unwrap_or("");
     let id = data
         .pointer("/message/id")
-        .and_then(|v| v.as_str())
+        .and_then(|field| field.as_str())
         .unwrap_or("");
     let mut parts = vec![format!("{} {} {}", model, role, id)];
     for key in &[
@@ -200,7 +200,7 @@ fn summarize_message_start(data: &serde_json::Value) -> String {
     ] {
         if let Some(tokens) = data
             .pointer(&format!("/message/usage/{}", key))
-            .and_then(|v| v.as_i64())
+            .and_then(|field| field.as_i64())
         {
             parts.push(format!("{}: {}", key, tokens));
         }
@@ -210,10 +210,10 @@ fn summarize_message_start(data: &serde_json::Value) -> String {
 
 fn summarize_content_block_delta(data: &serde_json::Value) -> String {
     let delta = &data["delta"];
-    let dtype = delta.get("type").and_then(|v| v.as_str()).unwrap_or("");
-    match dtype {
+    let delta_type = delta.get("type").and_then(|field| field.as_str()).unwrap_or("");
+    match delta_type {
         "text_delta" => {
-            let text = delta.get("text").and_then(|v| v.as_str()).unwrap_or("");
+            let text = delta.get("text").and_then(|field| field.as_str()).unwrap_or("");
             if text.len() > 80 {
                 format!("{}...", &text[..80])
             } else {
@@ -221,7 +221,7 @@ fn summarize_content_block_delta(data: &serde_json::Value) -> String {
             }
         }
         "thinking_delta" => {
-            let text = delta.get("thinking").and_then(|v| v.as_str()).unwrap_or("");
+            let text = delta.get("thinking").and_then(|field| field.as_str()).unwrap_or("");
             if text.len() > 80 {
                 format!("{}...", &text[..80])
             } else {
@@ -231,7 +231,7 @@ fn summarize_content_block_delta(data: &serde_json::Value) -> String {
         "input_json_delta" => {
             let json = delta
                 .get("partial_json")
-                .and_then(|v| v.as_str())
+                .and_then(|field| field.as_str())
                 .unwrap_or("");
             if json.len() > 80 {
                 format!("{}...", &json[..80])
@@ -246,7 +246,7 @@ fn summarize_content_block_delta(data: &serde_json::Value) -> String {
 fn summarize_message_delta(data: &serde_json::Value) -> String {
     let stop_reason = data
         .pointer("/delta/stop_reason")
-        .and_then(|v| v.as_str())
+        .and_then(|field| field.as_str())
         .unwrap_or("");
     let mut parts = Vec::new();
     if !stop_reason.is_empty() {
@@ -260,7 +260,7 @@ fn summarize_message_delta(data: &serde_json::Value) -> String {
     ] {
         if let Some(tokens) = data
             .pointer(&format!("/usage/{}", key))
-            .and_then(|v| v.as_i64())
+            .and_then(|field| field.as_i64())
         {
             parts.push(format!("{}: {}", key, tokens));
         }
@@ -272,34 +272,34 @@ pub fn summarize_sse_event(event_type: &str, data: &serde_json::Value) -> String
     match event_type {
         "message_start" => summarize_message_start(data),
         "content_block_start" => {
-            let btype = data
+            let block_type = data
                 .pointer("/content_block/type")
-                .and_then(|v| v.as_str())
+                .and_then(|field| field.as_str())
                 .unwrap_or("");
-            let index = data.get("index").and_then(|v| v.as_i64()).unwrap_or(0);
+            let index = data.get("index").and_then(|field| field.as_i64()).unwrap_or(0);
             let name = data
                 .pointer("/content_block/name")
-                .and_then(|v| v.as_str())
+                .and_then(|field| field.as_str())
                 .unwrap_or("");
             if name.is_empty() {
-                format!("[{}] {}", index, btype)
+                format!("[{}] {}", index, block_type)
             } else {
-                format!("[{}] {} {}", index, btype, name)
+                format!("[{}] {} {}", index, block_type, name)
             }
         }
         "content_block_delta" => summarize_content_block_delta(data),
         "content_block_stop" => {
-            let index = data.get("index").and_then(|v| v.as_i64()).unwrap_or(0);
+            let index = data.get("index").and_then(|field| field.as_i64()).unwrap_or(0);
             format!("[{}]", index)
         }
         "message_delta" => summarize_message_delta(data),
         "message_stop" => String::new(),
         _ => {
-            let s = serde_json::to_string(data).unwrap_or_default();
-            if s.len() > 120 {
-                format!("{}...", &s[..120])
+            let string = serde_json::to_string(data).unwrap_or_default();
+            if string.len() > 120 {
+                format!("{}...", &string[..120])
             } else {
-                s
+                string
             }
         }
     }

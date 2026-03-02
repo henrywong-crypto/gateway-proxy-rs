@@ -11,10 +11,10 @@ fn collect_filtered_tool_ids(msgs: &[serde_json::Value], keep_tool_pairs: i64) -
     }
     let mut all_ids: Vec<String> = Vec::new();
     for msg in msgs {
-        if let Some(blocks) = msg.get("content").and_then(|c| c.as_array()) {
+        if let Some(blocks) = msg.get("content").and_then(|field| field.as_array()) {
             for block in blocks {
-                if block.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
-                    if let Some(id) = block.get("id").and_then(|i| i.as_str()) {
+                if block.get("type").and_then(|field| field.as_str()) == Some("tool_use") {
+                    if let Some(id) = block.get("id").and_then(|field| field.as_str()) {
                         all_ids.push(id.to_string());
                     }
                 }
@@ -30,7 +30,7 @@ fn collect_filtered_tool_ids(msgs: &[serde_json::Value], keep_tool_pairs: i64) -
 }
 
 fn render_text_block(block: &serde_json::Value, role_cell: String) -> AnyView {
-    let text = block.get("text").and_then(|t| t.as_str()).unwrap_or("");
+    let text = block.get("text").and_then(|field| field.as_str()).unwrap_or("");
     let cache_info = format_cache_control_label(block);
     let type_label = format!("text{}", cache_info);
     let cb = collapsible_block(text, "");
@@ -45,7 +45,7 @@ fn render_text_block(block: &serde_json::Value, role_cell: String) -> AnyView {
 }
 
 fn render_thinking_block(block: &serde_json::Value, role_cell: String) -> AnyView {
-    let text = block.get("thinking").and_then(|t| t.as_str()).unwrap_or("");
+    let text = block.get("thinking").and_then(|field| field.as_str()).unwrap_or("");
     let cache_info = format_cache_control_label(block);
     let type_label = format!("thinking{}", cache_info);
     let cb = collapsible_block(text, "");
@@ -67,12 +67,12 @@ fn render_tool_use_block(
 ) -> AnyView {
     let name = block
         .get("name")
-        .and_then(|n| n.as_str())
+        .and_then(|field| field.as_str())
         .unwrap_or("")
         .to_string();
     let id = block
         .get("id")
-        .and_then(|i| i.as_str())
+        .and_then(|field| field.as_str())
         .unwrap_or("")
         .to_string();
     let cache_info = format_cache_control_label(block);
@@ -80,20 +80,20 @@ fn render_tool_use_block(
 
     let params_rows: Vec<AnyView> = block
         .get("input")
-        .and_then(|i| i.as_object())
+        .and_then(|field| field.as_object())
         .map(|input| {
             input
                 .iter()
-                .map(|(k, v)| {
-                    let val = if v.is_string() {
-                        v.as_str().unwrap_or("").to_string()
+                .map(|(key, value)| {
+                    let val_str = if value.is_string() {
+                        value.as_str().unwrap_or("").to_string()
                     } else {
-                        serde_json::to_string(v).unwrap_or_default()
+                        serde_json::to_string(value).unwrap_or_default()
                     };
-                    let k = k.clone();
-                    let cb = collapsible_block(&val, "");
+                    let key = key.clone();
+                    let cb = collapsible_block(&val_str, "");
                     view! {
-                        <tr><td>{k}</td><td>{cb}</td></tr>
+                        <tr><td>{key}</td><td>{cb}</td></tr>
                     }
                     .into_any()
                 })
@@ -131,16 +131,16 @@ fn render_tool_result_block(
 ) -> AnyView {
     let tool_use_id = block
         .get("tool_use_id")
-        .and_then(|i| i.as_str())
+        .and_then(|field| field.as_str())
         .unwrap_or("")
         .to_string();
     let cache_info = format_cache_control_label(block);
     let type_label = format!("tool_result{}", cache_info);
-    let result_text = if let Some(s) = block.get("content").and_then(|c| c.as_str()) {
-        s.to_string()
-    } else if let Some(arr) = block.get("content").and_then(|c| c.as_array()) {
+    let result_text = if let Some(string) = block.get("content").and_then(|field| field.as_str()) {
+        string.to_string()
+    } else if let Some(arr) = block.get("content").and_then(|field| field.as_array()) {
         arr.iter()
-            .filter_map(|c| c.get("text").and_then(|t| t.as_str()))
+            .filter_map(|element| element.get("text").and_then(|field| field.as_str()))
             .collect::<Vec<_>>()
             .join("\n")
     } else {
@@ -175,13 +175,13 @@ pub fn render_messages(json_str: &str, order: &str, keep_tool_pairs: i64) -> Any
         .flat_map(|msg| {
             let role = msg
                 .get("role")
-                .and_then(|r| r.as_str())
+                .and_then(|field| field.as_str())
                 .unwrap_or("unknown");
 
             let content = &msg["content"];
-            if let Some(s) = content.as_str() {
+            if let Some(string) = content.as_str() {
                 let role = role.to_string();
-                let cb = collapsible_block(s, "");
+                let cb = collapsible_block(string, "");
                 vec![view! {
                     <tr><td>{role}</td><td>"text"</td><td>{cb}</td></tr>
                 }
@@ -190,24 +190,26 @@ pub fn render_messages(json_str: &str, order: &str, keep_tool_pairs: i64) -> Any
                 blocks
                     .iter()
                     .enumerate()
-                    .filter_map(|(i, block)| {
-                        let btype = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
-                        let role_cell = if i == 0 {
+                    .filter_map(|(index, block)| {
+                        let block_type =
+                            block.get("type").and_then(|field| field.as_str()).unwrap_or("");
+                        let role_cell = if index == 0 {
                             role.to_string()
                         } else {
                             String::new()
                         };
 
                         // Determine if this block is filtered
-                        let is_filtered = match btype {
+                        let is_filtered = match block_type {
                             "tool_use" => {
-                                let id = block.get("id").and_then(|i| i.as_str()).unwrap_or("");
+                                let id =
+                                    block.get("id").and_then(|field| field.as_str()).unwrap_or("");
                                 filtered_ids.contains(id)
                             }
                             "tool_result" => {
                                 let id = block
                                     .get("tool_use_id")
-                                    .and_then(|i| i.as_str())
+                                    .and_then(|field| field.as_str())
                                     .unwrap_or("");
                                 filtered_ids.contains(id)
                             }
@@ -222,7 +224,7 @@ pub fn render_messages(json_str: &str, order: &str, keep_tool_pairs: i64) -> Any
                             Either::Right(())
                         };
 
-                        match btype {
+                        match block_type {
                             "text" => Some(render_text_block(block, role_cell)),
                             "thinking" => Some(render_thinking_block(block, role_cell)),
                             "tool_use" => Some(render_tool_use_block(
@@ -263,9 +265,9 @@ pub fn render_messages(json_str: &str, order: &str, keep_tool_pairs: i64) -> Any
 fn format_cache_control_label(block: &serde_json::Value) -> String {
     block
         .get("cache_control")
-        .and_then(|c| c.get("type"))
-        .and_then(|t| t.as_str())
-        .map(|t| format!(" (cache: {})", t))
+        .and_then(|control| control.get("type"))
+        .and_then(|field| field.as_str())
+        .map(|cache_type| format!(" (cache: {})", cache_type))
         .unwrap_or_default()
 }
 

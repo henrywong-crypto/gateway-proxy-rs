@@ -29,18 +29,18 @@ pub fn render_sessions_view(sessions: &[Session], pagination: &Pagination) -> St
                         <th>"Created"</th>
                         <th></th>
                     </tr>
-                    {sessions.into_iter().map(|s| {
-                        let href = format!("/_dashboard/sessions/{}", s.id);
-                        let clear_action = format!("/_dashboard/sessions/{}/clear", s.id);
-                        let delete_action = format!("/_dashboard/sessions/{}/delete", s.id);
-                        let id_str = s.id.to_string();
+                    {sessions.into_iter().map(|session| {
+                        let href = format!("/_dashboard/sessions/{}", session.id);
+                        let clear_action = format!("/_dashboard/sessions/{}/clear", session.id);
+                        let delete_action = format!("/_dashboard/sessions/{}/delete", session.id);
+                        let id_str = session.id.to_string();
                         view! {
                             <tr>
                                 <td><a href={href}>{id_str}</a></td>
-                                <td>{s.name}</td>
-                                <td>{s.target_url}</td>
-                                <td>{s.request_count}</td>
-                                <td>{s.created_at.clone().unwrap_or_default()}</td>
+                                <td>{session.name}</td>
+                                <td>{session.target_url}</td>
+                                <td>{session.request_count}</td>
+                                <td>{session.created_at.clone().unwrap_or_default()}</td>
                                 <td>
                                     <form method="POST" action={clear_action}>
                                         <button type="submit">"Clear"</button>
@@ -96,16 +96,16 @@ pub fn render_new_session_form(profiles: &[FilterProfile], default_profile_id: &
                     <td><label>"Filter Profile"</label></td>
                     <td>
                         <select name="profile_id">
-                            {profiles.into_iter().map(|p| {
-                                let pid = p.id.to_string();
-                                let selected = pid == default_profile_id;
-                                let label = if p.is_default {
-                                    format!("{} (default)", p.name)
+                            {profiles.into_iter().map(|profile| {
+                                let profile_id = profile.id.to_string();
+                                let selected = profile_id == default_profile_id;
+                                let label = if profile.is_default {
+                                    format!("{} (default)", profile.name)
                                 } else {
-                                    p.name.clone()
+                                    profile.name.clone()
                                 };
                                 view! {
-                                    <option value={pid} selected={selected}>{label}</option>
+                                    <option value={profile_id} selected={selected}>{label}</option>
                                 }
                             }).collect::<Vec<_>>()}
                         </select>
@@ -177,16 +177,16 @@ pub fn render_edit_session_form(
                     <td><label>"Filter Profile"</label></td>
                     <td>
                         <select name="profile_id">
-                            {profiles.into_iter().map(|p| {
-                                let pid = p.id.to_string();
-                                let selected = pid == current_profile_id;
-                                let label = if p.is_default {
-                                    format!("{} (default)", p.name)
+                            {profiles.into_iter().map(|profile| {
+                                let profile_id = profile.id.to_string();
+                                let selected = profile_id == current_profile_id;
+                                let label = if profile.is_default {
+                                    format!("{} (default)", profile.name)
                                 } else {
-                                    p.name.clone()
+                                    profile.name.clone()
                                 };
                                 view! {
-                                    <option value={pid} selected={selected}>{label}</option>
+                                    <option value={profile_id} selected={selected}>{label}</option>
                                 }
                             }).collect::<Vec<_>>()}
                         </select>

@@ -4,13 +4,13 @@ use regex::Regex;
 use crate::collapsible_block;
 
 fn find_matched_filter<'a>(text: &str, filters: &'a [String]) -> Option<&'a str> {
-    filters.iter().find_map(|f| {
-        let matched = match Regex::new(f) {
+    filters.iter().find_map(|filter| {
+        let matched = match Regex::new(filter) {
             Ok(re) => re.is_match(text),
-            Err(_) => text.contains(f.as_str()),
+            Err(_) => text.contains(filter.as_str()),
         };
         if matched {
-            Some(f.as_str())
+            Some(filter.as_str())
         } else {
             None
         }
@@ -32,19 +32,19 @@ fn render_filtered_content(text: &str, filter_pattern: Option<&str>) -> AnyView 
 }
 
 pub fn render_system(json_str: &str, filters: &[String]) -> AnyView {
-    let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) else {
-        let s = json_str.to_string();
-        return view! { <pre>{s}</pre> }.into_any();
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_str) else {
+        let string = json_str.to_string();
+        return view! { <pre>{string}</pre> }.into_any();
     };
 
-    if let Some(s) = val.as_str() {
-        let filter_match = find_matched_filter(s, filters);
+    if let Some(string) = parsed.as_str() {
+        let filter_match = find_matched_filter(string, filters);
         let row_class = if filter_match.is_some() {
             "filtered-row"
         } else {
             ""
         };
-        let content = render_filtered_content(s, filter_match);
+        let content = render_filtered_content(string, filter_match);
         return view! {
             <table>
                 <tr><th>"Type"</th><th>"Content"</th></tr>
@@ -54,12 +54,12 @@ pub fn render_system(json_str: &str, filters: &[String]) -> AnyView {
         .into_any();
     }
 
-    if let Some(arr) = val.as_array() {
-        let rows: Vec<AnyView> = arr
+    if let Some(array) = parsed.as_array() {
+        let rows: Vec<AnyView> = array
             .iter()
             .map(|block| {
-                let btype = block.get("type").and_then(|t| t.as_str()).unwrap_or("text");
-                let text = block.get("text").and_then(|t| t.as_str()).unwrap_or("");
+                let block_type = block.get("type").and_then(|field| field.as_str()).unwrap_or("text");
+                let text = block.get("text").and_then(|field| field.as_str()).unwrap_or("");
                 let fallback;
                 let text = if text.is_empty() {
                     fallback = serde_json::to_string_pretty(block).unwrap_or_default();
@@ -75,11 +75,11 @@ pub fn render_system(json_str: &str, filters: &[String]) -> AnyView {
                 };
                 let cache_info = block
                     .get("cache_control")
-                    .and_then(|c| c.get("type"))
-                    .and_then(|t| t.as_str())
-                    .map(|t| format!(" (cache: {})", t))
+                    .and_then(|field| field.get("type"))
+                    .and_then(|field| field.as_str())
+                    .map(|cache_type| format!(" (cache: {})", cache_type))
                     .unwrap_or_default();
-                let type_label = format!("{}{}", btype, cache_info);
+                let type_label = format!("{}{}", block_type, cache_info);
                 let content = render_filtered_content(text, filter_match);
                 view! {
                     <tr class={row_class}><td>{type_label}</td><td>{content}</td></tr>
@@ -97,6 +97,6 @@ pub fn render_system(json_str: &str, filters: &[String]) -> AnyView {
         .into_any();
     }
 
-    let s = serde_json::to_string_pretty(&val).unwrap_or_default();
-    view! { <pre>{s}</pre> }.into_any()
+    let string = serde_json::to_string_pretty(&parsed).unwrap_or_default();
+    view! { <pre>{string}</pre> }.into_any()
 }

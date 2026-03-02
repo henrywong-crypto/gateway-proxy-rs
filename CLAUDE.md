@@ -2,6 +2,8 @@
 
 ## Code Conventions
 
+Every convention exists to maximize readability — code should read like well-written prose where names, structure, and boundaries make intent obvious at a glance.
+
 ### Imports
 
 Always import items at the top of the file with `use` statements instead of using fully qualified paths inline:

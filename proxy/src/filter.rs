@@ -35,12 +35,12 @@ fn apply_system_filters(body: &mut Value, filters: &[String]) {
     }
 
     let system = match body.get_mut("system") {
-        Some(v) => v,
+        Some(system) => system,
         None => return,
     };
 
-    if let Some(s) = system.as_str().map(|s| s.to_string()) {
-        if filters.iter().any(|f| matches_pattern(&s, f)) {
+    if let Some(string) = system.as_str().map(|string| string.to_string()) {
+        if filters.iter().any(|filter| matches_pattern(&string, filter)) {
             if let Some(obj) = body.as_object_mut() {
                 obj.remove("system");
             }
@@ -50,8 +50,8 @@ fn apply_system_filters(body: &mut Value, filters: &[String]) {
 
     if let Some(arr) = system.as_array_mut() {
         arr.retain(|block| {
-            let text = block.get("text").and_then(|t| t.as_str()).unwrap_or("");
-            !filters.iter().any(|f| matches_pattern(text, f))
+            let text = block.get("text").and_then(|field| field.as_str()).unwrap_or("");
+            !filters.iter().any(|filter| matches_pattern(text, filter))
         });
         if arr.is_empty() {
             if let Some(obj) = body.as_object_mut() {
@@ -67,14 +67,14 @@ fn apply_tool_filters(body: &mut Value, filters: &[String]) {
     }
 
     let tools = match body.get_mut("tools") {
-        Some(v) => v,
+        Some(tools) => tools,
         None => return,
     };
 
     if let Some(arr) = tools.as_array_mut() {
         arr.retain(|tool| {
-            let name = tool.get("name").and_then(|n| n.as_str()).unwrap_or("");
-            !filters.iter().any(|f| f == name)
+            let name = tool.get("name").and_then(|field| field.as_str()).unwrap_or("");
+            !filters.iter().any(|filter| filter == name)
         });
         if arr.is_empty() {
             if let Some(obj) = body.as_object_mut() {
@@ -93,10 +93,10 @@ fn apply_message_filters(body: &mut Value, keep: usize) {
     // 1. Collect all tool_use IDs in chronological order
     let mut all_tool_ids: Vec<String> = Vec::new();
     for msg in messages.iter() {
-        if let Some(blocks) = msg.get("content").and_then(|c| c.as_array()) {
+        if let Some(blocks) = msg.get("content").and_then(|content| content.as_array()) {
             for block in blocks {
-                if block.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
-                    if let Some(id) = block.get("id").and_then(|i| i.as_str()) {
+                if block.get("type").and_then(|field| field.as_str()) == Some("tool_use") {
+                    if let Some(id) = block.get("id").and_then(|field| field.as_str()) {
                         all_tool_ids.push(id.to_string());
                     }
                 }
@@ -112,7 +112,7 @@ fn apply_message_filters(body: &mut Value, keep: usize) {
     let remove_count = all_tool_ids.len() - keep;
     let ids_to_remove: HashSet<&str> = all_tool_ids[..remove_count]
         .iter()
-        .map(|s| s.as_str())
+        .map(|id| id.as_str())
         .collect();
 
     // 3. Filter content blocks and remove empty messages
@@ -123,16 +123,16 @@ fn apply_message_filters(body: &mut Value, keep: usize) {
         };
 
         content.retain(|block| {
-            let btype = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
-            match btype {
+            let block_type = block.get("type").and_then(|field| field.as_str()).unwrap_or("");
+            match block_type {
                 "tool_use" => {
-                    let id = block.get("id").and_then(|i| i.as_str()).unwrap_or("");
+                    let id = block.get("id").and_then(|field| field.as_str()).unwrap_or("");
                     !ids_to_remove.contains(id)
                 }
                 "tool_result" => {
                     let id = block
                         .get("tool_use_id")
-                        .and_then(|i| i.as_str())
+                        .and_then(|field| field.as_str())
                         .unwrap_or("");
                     !ids_to_remove.contains(id)
                 }

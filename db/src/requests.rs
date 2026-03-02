@@ -63,12 +63,15 @@ pub async fn list_requests_paginated(
     .await?)
 }
 
-pub async fn get_request(pool: &SqlitePool, req_id: &str) -> anyhow::Result<Option<ProxyRequest>> {
+pub async fn get_request(
+    pool: &SqlitePool,
+    request_id: &str,
+) -> anyhow::Result<Option<ProxyRequest>> {
     Ok(sqlx::query_as::<_, ProxyRequest>(&format!(
         "SELECT {} FROM requests WHERE id = ?",
         REQUEST_COLUMNS
     ))
-    .bind(req_id)
+    .bind(request_id)
     .fetch_all(pool)
     .await?
     .pop())

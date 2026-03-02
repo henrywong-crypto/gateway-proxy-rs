@@ -190,6 +190,10 @@ fn configure_routes(cfg: &mut web::ServiceConfig) {
             web::post().to(handlers::clear_webfetch_intercept_post),
         )
         .route(
+            "/_dashboard/sessions/{id}/tool-intercept/webfetch/tool-names",
+            web::post().to(handlers::set_webfetch_tool_names_post),
+        )
+        .route(
             "/_dashboard/sessions/{id}/tool-intercept/webfetch/whitelist",
             web::post().to(handlers::set_webfetch_whitelist_post),
         )

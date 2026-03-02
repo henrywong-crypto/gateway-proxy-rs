@@ -139,14 +139,14 @@ fn translate_bedrock_request(
     // Extract anthropic_version and anthropic_beta from body
     let anthropic_version = obj
         .remove("anthropic_version")
-        .and_then(|v| v.as_str().map(|s| s.to_string()));
-    let body_beta = obj.remove("anthropic_beta").map(|v| match v {
-        serde_json::Value::Array(arr) => arr
+        .and_then(|field| field.as_str().map(|string| string.to_string()));
+    let body_beta = obj.remove("anthropic_beta").map(|field| match field {
+        serde_json::Value::Array(array) => array
             .iter()
-            .filter_map(|item| item.as_str().map(|s| s.to_string()))
+            .filter_map(|item| item.as_str().map(|string| string.to_string()))
             .collect::<Vec<_>>()
             .join(","),
-        serde_json::Value::String(s) => s,
+        serde_json::Value::String(string) => string,
         other => other.to_string(),
     });
 
@@ -154,12 +154,12 @@ fn translate_bedrock_request(
     let header_beta = req
         .headers()
         .get("anthropic-beta")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
+        .and_then(|field| field.to_str().ok())
+        .map(|string| string.to_string());
     let anthropic_beta = match (header_beta, body_beta) {
-        (Some(h), Some(b)) => Some(format!("{},{}", h, b)),
-        (Some(h), None) => Some(h),
-        (None, Some(b)) => Some(b),
+        (Some(header), Some(body)) => Some(format!("{},{}", header, body)),
+        (Some(header), None) => Some(header),
+        (None, Some(body)) => Some(body),
         (None, None) => None,
     };
 
@@ -181,29 +181,29 @@ fn translate_bedrock_request(
         reqwest::header::HeaderValue::from_static("application/json"),
     );
     if let Some(ref ver) = anthropic_version {
-        if let Ok(val) = reqwest::header::HeaderValue::from_str(ver) {
+        if let Ok(header_value) = reqwest::header::HeaderValue::from_str(ver) {
             headers.insert(
                 reqwest::header::HeaderName::from_static("anthropic-version"),
-                val,
+                header_value,
             );
         }
     }
     if let Some(ref beta) = anthropic_beta {
-        if let Ok(val) = reqwest::header::HeaderValue::from_str(beta) {
+        if let Ok(header_value) = reqwest::header::HeaderValue::from_str(beta) {
             headers.insert(
                 reqwest::header::HeaderName::from_static("anthropic-beta"),
-                val,
+                header_value,
             );
         }
     }
     if let Some(auth_value) = auth_header {
-        if let Ok(val) = reqwest::header::HeaderValue::from_str(auth_value) {
-            headers.insert(reqwest::header::AUTHORIZATION, val);
+        if let Ok(header_value) = reqwest::header::HeaderValue::from_str(auth_value) {
+            headers.insert(reqwest::header::AUTHORIZATION, header_value);
         }
     }
     if let Some(key_value) = x_api_key {
-        if let Ok(val) = reqwest::header::HeaderValue::from_str(key_value) {
-            headers.insert(reqwest::header::HeaderName::from_static("x-api-key"), val);
+        if let Ok(header_value) = reqwest::header::HeaderValue::from_str(key_value) {
+            headers.insert(reqwest::header::HeaderName::from_static("x-api-key"), header_value);
         }
     }
 
@@ -443,7 +443,7 @@ pub async fn bedrock_streaming_handler(
         upstream
             .headers()
             .iter()
-            .filter_map(|(k, v)| v.to_str().ok().map(|s| (k.to_string(), s.to_string()))),
+            .filter_map(|(key, value)| value.to_str().ok().map(|string| (key.to_string(), string.to_string()))),
     )
     .map_err(ErrorInternalServerError)?;
 

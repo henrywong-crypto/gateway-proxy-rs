@@ -6,16 +6,16 @@ pub async fn show_webfetch_intercept_page(
     pool: web::Data<SqlitePool>,
     path: web::Path<(String, String)>,
 ) -> HttpResponse {
-    let (session_id, req_id) = path.into_inner();
+    let (session_id, request_id) = path.into_inner();
 
     let session = match db::get_session(pool.get_ref(), &session_id).await {
-        Ok(Some(s)) => s,
+        Ok(Some(session)) => session,
         Ok(None) => return HttpResponse::NotFound().body("Session not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
 
-    let request = match db::get_request(pool.get_ref(), &req_id).await {
-        Ok(Some(r)) => r,
+    let request = match db::get_request(pool.get_ref(), &request_id).await {
+        Ok(Some(request)) => request,
         Ok(None) => return HttpResponse::NotFound().body("Request not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
@@ -28,27 +28,27 @@ pub async fn show_webfetch_agent_page(
     pool: web::Data<SqlitePool>,
     path: web::Path<(String, String, String)>,
 ) -> HttpResponse {
-    let (session_id, req_id, agent_req_id) = path.into_inner();
+    let (session_id, request_id, agent_request_id) = path.into_inner();
 
     let session = match db::get_session(pool.get_ref(), &session_id).await {
-        Ok(Some(s)) => s,
+        Ok(Some(session)) => session,
         Ok(None) => return HttpResponse::NotFound().body("Session not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
 
-    let request = match db::get_request(pool.get_ref(), &req_id).await {
-        Ok(Some(r)) => r,
+    let request = match db::get_request(pool.get_ref(), &request_id).await {
+        Ok(Some(request)) => request,
         Ok(None) => return HttpResponse::NotFound().body("Request not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
 
-    let agent_req = match db::get_request(pool.get_ref(), &agent_req_id).await {
-        Ok(Some(r)) => r,
+    let agent_request = match db::get_request(pool.get_ref(), &agent_request_id).await {
+        Ok(Some(request)) => request,
         Ok(None) => return HttpResponse::NotFound().body("Agent request not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
 
-    let html = pages::detail::render_webfetch_agent_overview(&request, &session, &agent_req);
+    let html = pages::detail::render_webfetch_agent_overview(&request, &session, &agent_request);
     HttpResponse::Ok().content_type("text/html").body(html)
 }
 
@@ -57,22 +57,22 @@ pub async fn show_webfetch_agent_subpage(
     path: web::Path<(String, String, String, String)>,
     query: web::Query<HashMap<String, String>>,
 ) -> HttpResponse {
-    let (session_id, req_id, agent_req_id, page) = path.into_inner();
+    let (session_id, request_id, agent_request_id, page) = path.into_inner();
 
     let session = match db::get_session(pool.get_ref(), &session_id).await {
-        Ok(Some(s)) => s,
+        Ok(Some(session)) => session,
         Ok(None) => return HttpResponse::NotFound().body("Session not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
 
-    let request = match db::get_request(pool.get_ref(), &req_id).await {
-        Ok(Some(r)) => r,
+    let request = match db::get_request(pool.get_ref(), &request_id).await {
+        Ok(Some(request)) => request,
         Ok(None) => return HttpResponse::NotFound().body("Request not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
 
-    let agent_req = match db::get_request(pool.get_ref(), &agent_req_id).await {
-        Ok(Some(r)) => r,
+    let agent_request = match db::get_request(pool.get_ref(), &agent_request_id).await {
+        Ok(Some(request)) => request,
         Ok(None) => return HttpResponse::NotFound().body("Agent request not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
@@ -84,13 +84,13 @@ pub async fn show_webfetch_agent_subpage(
             .await
             .unwrap_or_default()
             .into_iter()
-            .map(|f| f.pattern)
+            .map(|filter| filter.pattern)
             .collect(),
         "tools" => db::list_tool_filters(pool.get_ref(), &profile_id)
             .await
             .unwrap_or_default()
             .into_iter()
-            .map(|f| f.name)
+            .map(|filter| filter.name)
             .collect(),
         _ => Vec::new(),
     };
@@ -106,7 +106,7 @@ pub async fn show_webfetch_agent_subpage(
     let html = pages::detail::render_webfetch_agent_page(
         &request,
         &session,
-        &agent_req,
+        &agent_request,
         &page,
         &query,
         &filters,

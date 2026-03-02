@@ -85,7 +85,7 @@ pub async fn get_default_filter_profile_id(pool: &SqlitePool) -> anyhow::Result<
         sqlx::query_as("SELECT id FROM filter_profiles WHERE is_default = 1 LIMIT 1")
             .fetch_optional(pool)
             .await?;
-    Ok(row.map(|r| r.0).unwrap_or_default())
+    Ok(row.map(|row| row.0).unwrap_or_default())
 }
 
 pub async fn count_system_filters(pool: &SqlitePool, profile_id: &str) -> anyhow::Result<i64> {
@@ -111,7 +111,7 @@ pub async fn get_setting(pool: &SqlitePool, key: &str) -> anyhow::Result<Option<
         .bind(key)
         .fetch_optional(pool)
         .await?;
-    Ok(row.map(|r| r.0))
+    Ok(row.map(|row| row.0))
 }
 
 pub async fn set_setting(pool: &SqlitePool, key: &str, value: &str) -> anyhow::Result<()> {
@@ -129,7 +129,7 @@ pub async fn set_setting(pool: &SqlitePool, key: &str, value: &str) -> anyhow::R
 pub async fn ensure_default_filter_profile(pool: &SqlitePool) -> anyhow::Result<()> {
     let profiles = list_filter_profiles(pool).await?;
 
-    let has_default = profiles.iter().any(|p| p.is_default);
+    let has_default = profiles.iter().any(|profile| profile.is_default);
 
     if profiles.is_empty() {
         // Create default profile and mark it as default
@@ -286,7 +286,7 @@ pub async fn get_filter_profile_keep_tool_pairs(
             .bind(profile_id)
             .fetch_optional(pool)
             .await?;
-    Ok(row.map(|r| r.0).unwrap_or(0))
+    Ok(row.map(|row| row.0).unwrap_or(0))
 }
 
 pub async fn set_filter_profile_message_filter(

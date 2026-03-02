@@ -31,10 +31,11 @@ pub fn list_pending(
     queue: &ApprovalQueue,
     session_id: &str,
 ) -> Vec<(String, Vec<PendingToolInfo>)> {
-    let map = queue.lock().unwrap();
-    map.iter()
-        .filter(|(_, v)| v.session_id == session_id)
-        .map(|(id, v)| (id.clone(), v.tools.clone()))
+    let queue_map = queue.lock().unwrap();
+    queue_map
+        .iter()
+        .filter(|(_, pending)| pending.session_id == session_id)
+        .map(|(id, pending)| (id.clone(), pending.tools.clone()))
         .collect()
 }
 
@@ -46,8 +47,8 @@ pub fn resolve_pending(
     decision: ApprovalDecision,
 ) -> bool {
     let pending = {
-        let mut map = queue.lock().unwrap();
-        map.remove(approval_id)
+        let mut queue_map = queue.lock().unwrap();
+        queue_map.remove(approval_id)
     };
     if let Some(pending) = pending {
         let _ = pending.sender.send(decision);

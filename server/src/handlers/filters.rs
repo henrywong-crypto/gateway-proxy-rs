@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 pub async fn show_filters_page(pool: web::Data<SqlitePool>) -> HttpResponse {
     let profiles = match db::list_filter_profiles(pool.get_ref()).await {
-        Ok(p) => p,
+        Ok(profiles) => profiles,
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
     let html = pages::filters::render_filters_view(&profiles);
@@ -21,7 +21,7 @@ pub async fn create_filter_post(
     form: web::Form<HashMap<String, String>>,
 ) -> HttpResponse {
     let name = match form.get("name") {
-        Some(n) if !n.is_empty() => n.clone(),
+        Some(name) if !name.is_empty() => name.clone(),
         _ => return HttpResponse::BadRequest().body("Name is required"),
     };
     match db::create_filter_profile(pool.get_ref(), &name).await {
@@ -38,7 +38,7 @@ pub async fn show_filter_profile_page(
 ) -> HttpResponse {
     let profile_id = path.into_inner();
     let profile = match db::get_filter_profile(pool.get_ref(), &profile_id).await {
-        Ok(Some(p)) => p,
+        Ok(Some(profile)) => profile,
         Ok(None) => return HttpResponse::NotFound().body("Profile not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
@@ -62,7 +62,7 @@ pub async fn show_edit_filter_profile_form(
 ) -> HttpResponse {
     let profile_id = path.into_inner();
     let profile = match db::get_filter_profile(pool.get_ref(), &profile_id).await {
-        Ok(Some(p)) => p,
+        Ok(Some(profile)) => profile,
         Ok(None) => return HttpResponse::NotFound().body("Profile not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
@@ -77,7 +77,7 @@ pub async fn update_filter_profile_post(
 ) -> HttpResponse {
     let profile_id = path.into_inner();
     let name = match form.get("name") {
-        Some(n) if !n.is_empty() => n.clone(),
+        Some(name) if !name.is_empty() => name.clone(),
         _ => return HttpResponse::BadRequest().body("Name is required"),
     };
     if let Err(e) = db::set_filter_profile_name(pool.get_ref(), &profile_id, &name).await {
@@ -96,7 +96,7 @@ pub async fn delete_filter_profile_post(
 
     // Protect the default profile from deletion
     match db::get_filter_profile(pool.get_ref(), &profile_id).await {
-        Ok(Some(p)) if p.is_default => {
+        Ok(Some(profile)) if profile.is_default => {
             return HttpResponse::BadRequest().body("Cannot delete the default profile");
         }
         Ok(None) => return HttpResponse::NotFound().body("Profile not found"),
@@ -118,7 +118,7 @@ pub async fn show_system_filters_page(
 ) -> HttpResponse {
     let profile_id = path.into_inner();
     let profile = match db::get_filter_profile(pool.get_ref(), &profile_id).await {
-        Ok(Some(p)) => p,
+        Ok(Some(profile)) => profile,
         Ok(None) => return HttpResponse::NotFound().body("Profile not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
@@ -135,7 +135,7 @@ pub async fn show_new_system_filter_form(
 ) -> HttpResponse {
     let profile_id = path.into_inner();
     let profile = match db::get_filter_profile(pool.get_ref(), &profile_id).await {
-        Ok(Some(p)) => p,
+        Ok(Some(profile)) => profile,
         Ok(None) => return HttpResponse::NotFound().body("Profile not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
@@ -175,12 +175,12 @@ pub async fn show_edit_system_filter_form(
 ) -> HttpResponse {
     let (profile_id, filter_id) = path.into_inner();
     let profile = match db::get_filter_profile(pool.get_ref(), &profile_id).await {
-        Ok(Some(p)) => p,
+        Ok(Some(profile)) => profile,
         Ok(None) => return HttpResponse::NotFound().body("Profile not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
     let filter = match db::get_system_filter(pool.get_ref(), &filter_id).await {
-        Ok(Some(f)) => f,
+        Ok(Some(filter)) => filter,
         Ok(None) => return HttpResponse::NotFound().body("Filter not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
@@ -233,7 +233,7 @@ pub async fn show_tool_filters_page(
 ) -> HttpResponse {
     let profile_id = path.into_inner();
     let profile = match db::get_filter_profile(pool.get_ref(), &profile_id).await {
-        Ok(Some(p)) => p,
+        Ok(Some(profile)) => profile,
         Ok(None) => return HttpResponse::NotFound().body("Profile not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
@@ -250,7 +250,7 @@ pub async fn show_new_tool_filter_form(
 ) -> HttpResponse {
     let profile_id = path.into_inner();
     let profile = match db::get_filter_profile(pool.get_ref(), &profile_id).await {
-        Ok(Some(p)) => p,
+        Ok(Some(profile)) => profile,
         Ok(None) => return HttpResponse::NotFound().body("Profile not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
@@ -290,12 +290,12 @@ pub async fn show_edit_tool_filter_form(
 ) -> HttpResponse {
     let (profile_id, filter_id) = path.into_inner();
     let profile = match db::get_filter_profile(pool.get_ref(), &profile_id).await {
-        Ok(Some(p)) => p,
+        Ok(Some(profile)) => profile,
         Ok(None) => return HttpResponse::NotFound().body("Profile not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
     let filter = match db::get_tool_filter(pool.get_ref(), &filter_id).await {
-        Ok(Some(f)) => f,
+        Ok(Some(filter)) => filter,
         Ok(None) => return HttpResponse::NotFound().body("Filter not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
@@ -348,7 +348,7 @@ pub async fn show_message_filters_page(
 ) -> HttpResponse {
     let profile_id = path.into_inner();
     let profile = match db::get_filter_profile(pool.get_ref(), &profile_id).await {
-        Ok(Some(p)) => p,
+        Ok(Some(profile)) => profile,
         Ok(None) => return HttpResponse::NotFound().body("Profile not found"),
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
@@ -366,10 +366,11 @@ pub async fn update_message_filters_post(
 ) -> HttpResponse {
     let profile_id = path.into_inner();
 
-    if let Some(val) = form.get("keep_tool_pairs") {
-        if let Ok(n) = val.parse::<i64>() {
+    if let Some(keep_tool_pairs_str) = form.get("keep_tool_pairs") {
+        if let Ok(keep_tool_pairs) = keep_tool_pairs_str.parse::<i64>() {
             if let Err(e) =
-                db::set_filter_profile_message_filter(pool.get_ref(), &profile_id, n).await
+                db::set_filter_profile_message_filter(pool.get_ref(), &profile_id, keep_tool_pairs)
+                    .await
             {
                 return HttpResponse::InternalServerError().body(format!("DB error: {}", e));
             }

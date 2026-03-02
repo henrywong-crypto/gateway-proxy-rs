@@ -43,7 +43,7 @@ pub(super) async fn build_accept_result(
     tool_use: &ToolUse,
     ctx: &FetchContext<'_>,
 ) -> AcceptResult {
-    if !ctx.webfetch_names.iter().any(|n| n == &tool_use.name) {
+    if !ctx.webfetch_names.iter().any(|name| name == &tool_use.name) {
         return AcceptResult {
             tool_result: serde_json::json!({
                 "type": "tool_result",
@@ -58,8 +58,8 @@ pub(super) async fn build_accept_result(
         };
     }
 
-    let url_str = match tool_use.input.get("url").and_then(|v| v.as_str()) {
-        Some(u) => u,
+    let url_str = match tool_use.input.get("url").and_then(|field| field.as_str()) {
+        Some(url) => url,
         None => {
             return AcceptResult {
                 tool_result: serde_json::json!({
@@ -76,11 +76,11 @@ pub(super) async fn build_accept_result(
     let user_prompt = tool_use
         .input
         .get("prompt")
-        .and_then(|v| v.as_str())
+        .and_then(|field| field.as_str())
         .unwrap_or("");
 
     let original_url = match url::Url::parse(url_str) {
-        Ok(u) => u,
+        Ok(url) => url,
         Err(e) => {
             return AcceptResult {
                 tool_result: serde_json::json!({
@@ -104,7 +104,7 @@ pub(super) async fn build_accept_result(
         .send()
         .await
     {
-        Ok(r) => r,
+        Ok(response) => response,
         Err(e) => {
             return AcceptResult {
                 tool_result: serde_json::json!({
@@ -125,11 +125,11 @@ pub(super) async fn build_accept_result(
         if let Some(location) = fetch_response
             .headers()
             .get("location")
-            .and_then(|v| v.to_str().ok())
+            .and_then(|header_value| header_value.to_str().ok())
         {
             // Resolve relative redirects against the original URL
             let redirect_url = match original_url.join(location) {
-                Ok(u) => u,
+                Ok(url) => url,
                 Err(_) => {
                     return AcceptResult {
                         tool_result: serde_json::json!({
@@ -173,7 +173,7 @@ pub(super) async fn build_accept_result(
                 .send()
                 .await
             {
-                Ok(r) => r,
+                Ok(response) => response,
                 Err(e) => {
                     return AcceptResult {
                         tool_result: serde_json::json!({
@@ -279,7 +279,7 @@ async fn parse_bytes_to_accept_result(
 /// Returns the rendered string (HTML-to-text + truncation + Handlebars template).
 fn render_accept_content(bytes: &[u8], accept_prompt: &str, user_prompt: &str) -> String {
     let text = match html2text::from_read(bytes, 120) {
-        Ok(t) => t,
+        Ok(text) => text,
         Err(_) => String::from_utf8_lossy(bytes).to_string(),
     };
     let raw_content = if text.len() > MAX_ACCEPT_CONTENT_BYTES {
@@ -361,7 +361,7 @@ async fn log_agent_request(
     let headers_json = headers_to_json(
         ctx.forward_headers
             .iter()
-            .filter_map(|(k, v)| v.to_str().ok().map(|s| (k.to_string(), s.to_string()))),
+            .filter_map(|(key, value)| value.to_str().ok().map(|string| (key.to_string(), string.to_string()))),
     )
     .ok();
     match log_request(
@@ -392,7 +392,7 @@ async fn send_upstream_agent_request(
     agent_body: &Value,
 ) -> Result<(u16, reqwest::header::HeaderMap, bytes::Bytes), ()> {
     let agent_bytes = match serde_json::to_vec(agent_body) {
-        Ok(b) => b,
+        Ok(bytes) => bytes,
         Err(_) => return Err(()),
     };
 
@@ -407,7 +407,7 @@ async fn send_upstream_agent_request(
         .send()
         .await
     {
-        Ok(r) => r,
+        Ok(response) => response,
         Err(e) => {
             log::warn!("webfetch agent: upstream request failed: {}", e);
             return Err(());
@@ -417,7 +417,7 @@ async fn send_upstream_agent_request(
     let resp_status = agent_response.status().as_u16();
     let resp_headers = agent_response.headers().clone();
     let resp_body = match agent_response.bytes().await {
-        Ok(b) => b,
+        Ok(body_bytes) => body_bytes,
         Err(e) => {
             log::warn!("webfetch agent: failed to read response: {}", e);
             return Err(());
@@ -438,7 +438,7 @@ async fn store_agent_response(
     let resp_headers_json = headers_to_json(
         resp_headers
             .iter()
-            .filter_map(|(k, v)| v.to_str().ok().map(|s| (k.to_string(), s.to_string()))),
+            .filter_map(|(key, value)| value.to_str().ok().map(|string| (key.to_string(), string.to_string()))),
     )
     .ok();
     if let Err(e) = store_response(
