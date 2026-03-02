@@ -24,6 +24,7 @@ Exceptions — these are fine to use inline without a `use` import:
 - `serde_json::json!`
 - `tracing_subscriber::fmt::init()`
 - `std::env::var`
+- `aws_smithy_types::Document::*`
 
 Combine `use` statements that share the same top-level crate into a single `use` with nested paths:
 
