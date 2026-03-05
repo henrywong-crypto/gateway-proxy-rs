@@ -51,8 +51,16 @@ pub async fn show_filter_profile_page(
     let keep_tool_pairs = db::get_filter_profile_keep_tool_pairs(pool.get_ref(), &profile_id)
         .await
         .unwrap_or(0);
-    let html =
-        pages::filters::render_profile_view(&profile, system_count, tool_count, keep_tool_pairs);
+    let override_count = db::count_tool_name_overrides(pool.get_ref(), &profile_id)
+        .await
+        .unwrap_or(0);
+    let html = pages::filters::render_profile_view(
+        &profile,
+        system_count,
+        tool_count,
+        keep_tool_pairs,
+        override_count,
+    );
     HttpResponse::Ok().content_type("text/html").body(html)
 }
 
@@ -381,6 +389,135 @@ pub async fn update_message_filters_post(
         .insert_header((
             "Location",
             format!("/_dashboard/filters/{}/messages", profile_id),
+        ))
+        .finish()
+}
+
+pub async fn show_tool_name_overrides_page(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<String>,
+) -> HttpResponse {
+    let profile_id = path.into_inner();
+    let profile = match db::get_filter_profile(pool.get_ref(), &profile_id).await {
+        Ok(Some(profile)) => profile,
+        Ok(None) => return HttpResponse::NotFound().body("Profile not found"),
+        Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
+    };
+    let overrides = db::list_tool_name_overrides(pool.get_ref(), &profile_id)
+        .await
+        .unwrap_or_default();
+    let html = pages::filters::render_tool_name_overrides_view(&profile, &overrides);
+    HttpResponse::Ok().content_type("text/html").body(html)
+}
+
+pub async fn show_new_tool_name_override_form(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<String>,
+) -> HttpResponse {
+    let profile_id = path.into_inner();
+    let profile = match db::get_filter_profile(pool.get_ref(), &profile_id).await {
+        Ok(Some(profile)) => profile,
+        Ok(None) => return HttpResponse::NotFound().body("Profile not found"),
+        Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
+    };
+    let html = pages::filters::render_new_tool_name_override_form(&profile);
+    HttpResponse::Ok().content_type("text/html").body(html)
+}
+
+pub async fn create_tool_name_override_post(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<String>,
+    form: web::Form<HashMap<String, String>>,
+) -> HttpResponse {
+    let profile_id = path.into_inner();
+
+    let original_name = match form.get("original_name") {
+        Some(s) if !s.is_empty() => s.clone(),
+        _ => return HttpResponse::BadRequest().body("original_name is required"),
+    };
+    let override_name = match form.get("override_name") {
+        Some(s) if !s.is_empty() => s.clone(),
+        _ => return HttpResponse::BadRequest().body("override_name is required"),
+    };
+
+    if let Err(e) =
+        db::create_tool_name_override(pool.get_ref(), &profile_id, &original_name, &override_name)
+            .await
+    {
+        return HttpResponse::InternalServerError().body(format!("DB error: {}", e));
+    }
+
+    HttpResponse::SeeOther()
+        .insert_header((
+            "Location",
+            format!("/_dashboard/filters/{}/tool-name-overrides", profile_id),
+        ))
+        .finish()
+}
+
+pub async fn show_edit_tool_name_override_form(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<(String, String)>,
+) -> HttpResponse {
+    let (profile_id, override_id) = path.into_inner();
+    let profile = match db::get_filter_profile(pool.get_ref(), &profile_id).await {
+        Ok(Some(profile)) => profile,
+        Ok(None) => return HttpResponse::NotFound().body("Profile not found"),
+        Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
+    };
+    let tool_name_override = match db::get_tool_name_override(pool.get_ref(), &override_id).await {
+        Ok(Some(o)) => o,
+        Ok(None) => return HttpResponse::NotFound().body("Override not found"),
+        Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
+    };
+    let html =
+        pages::filters::render_edit_tool_name_override_form(&profile, &tool_name_override);
+    HttpResponse::Ok().content_type("text/html").body(html)
+}
+
+pub async fn update_tool_name_override_post(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<(String, String)>,
+    form: web::Form<HashMap<String, String>>,
+) -> HttpResponse {
+    let (profile_id, override_id) = path.into_inner();
+
+    let original_name = match form.get("original_name") {
+        Some(s) if !s.is_empty() => s.clone(),
+        _ => return HttpResponse::BadRequest().body("original_name is required"),
+    };
+    let override_name = match form.get("override_name") {
+        Some(s) if !s.is_empty() => s.clone(),
+        _ => return HttpResponse::BadRequest().body("override_name is required"),
+    };
+
+    if let Err(e) =
+        db::update_tool_name_override(pool.get_ref(), &override_id, &original_name, &override_name)
+            .await
+    {
+        return HttpResponse::InternalServerError().body(format!("DB error: {}", e));
+    }
+
+    HttpResponse::SeeOther()
+        .insert_header((
+            "Location",
+            format!("/_dashboard/filters/{}/tool-name-overrides", profile_id),
+        ))
+        .finish()
+}
+
+pub async fn delete_tool_name_override_post(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<(String, String)>,
+) -> HttpResponse {
+    let (profile_id, override_id) = path.into_inner();
+    if let Err(e) = db::delete_tool_name_override(pool.get_ref(), &override_id).await {
+        return HttpResponse::InternalServerError().body(format!("DB error: {}", e));
+    }
+    HttpResponse::SeeOther()
+        .insert_header((
+            "Location",
+            format!("/_dashboard/filters/{}/tool-name-overrides", profile_id),
         ))
         .finish()
 }

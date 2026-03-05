@@ -65,31 +65,6 @@ pub async fn clear_webfetch_intercept_post(
         .finish()
 }
 
-pub async fn set_webfetch_tool_names_post(
-    pool: web::Data<SqlitePool>,
-    path: web::Path<String>,
-    form: web::Form<HashMap<String, String>>,
-) -> HttpResponse {
-    let session_id = path.into_inner();
-    let tool_names = form.get("tool_names").map(|field| field.as_str()).unwrap_or("WebFetch");
-    let tool_names = if tool_names.trim().is_empty() {
-        "WebFetch"
-    } else {
-        tool_names
-    };
-    if let Err(e) =
-        db::set_session_webfetch_tool_names(pool.get_ref(), &session_id, tool_names).await
-    {
-        return HttpResponse::InternalServerError().body(format!("DB error: {}", e));
-    }
-    HttpResponse::SeeOther()
-        .insert_header((
-            "Location",
-            format!("/_dashboard/sessions/{}/tool-intercept/webfetch", session_id),
-        ))
-        .finish()
-}
-
 pub async fn set_webfetch_whitelist_post(
     pool: web::Data<SqlitePool>,
     path: web::Path<String>,

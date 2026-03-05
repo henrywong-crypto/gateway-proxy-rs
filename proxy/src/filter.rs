@@ -144,6 +144,115 @@ fn apply_message_filters(body: &mut Value, keep: usize) {
     });
 }
 
+/// Apply tool name overrides to outgoing request body.
+///
+/// Renames tools in `body["tools"][*]["name"]` and in `tool_use` content blocks
+/// in `body["messages"][*]["content"][*]["name"]`.
+pub fn apply_tool_name_overrides(body: &mut Value, overrides: &[(String, String)]) {
+    if overrides.is_empty() {
+        return;
+    }
+    rename_tool_names_in_tools_array(body, overrides);
+    rename_tool_names_in_messages(body, overrides);
+}
+
+fn rename_tool_names_in_tools_array(body: &mut Value, overrides: &[(String, String)]) {
+    let tools = match body.get_mut("tools").and_then(|v| v.as_array_mut()) {
+        Some(arr) => arr,
+        None => return,
+    };
+    for tool in tools.iter_mut() {
+        if let Some(name) = tool.get_mut("name") {
+            if let Some(name_str) = name.as_str().map(|s| s.to_string()) {
+                for (original, override_name) in overrides {
+                    if name_str == *original {
+                        *name = Value::String(override_name.clone());
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn rename_tool_names_in_messages(body: &mut Value, overrides: &[(String, String)]) {
+    let messages = match body.get_mut("messages").and_then(|v| v.as_array_mut()) {
+        Some(arr) => arr,
+        None => return,
+    };
+    for message in messages.iter_mut() {
+        let content = match message.get_mut("content").and_then(|v| v.as_array_mut()) {
+            Some(arr) => arr,
+            None => continue,
+        };
+        for block in content.iter_mut() {
+            if block.get("type").and_then(|t| t.as_str()) != Some("tool_use") {
+                continue;
+            }
+            if let Some(name) = block.get_mut("name") {
+                if let Some(name_str) = name.as_str().map(|s| s.to_string()) {
+                    for (original, override_name) in overrides {
+                        if name_str == *original {
+                            *name = Value::String(override_name.clone());
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Reverse tool name override in an incoming SSE event (response side).
+///
+/// Only modifies `content_block_start` events where `content_block.type == "tool_use"`.
+/// Returns the (possibly modified) data string.
+pub fn reverse_tool_name_in_sse_event(
+    event_type: &str,
+    data_str: &str,
+    overrides: &[(String, String)],
+) -> String {
+    if overrides.is_empty() || event_type != "content_block_start" {
+        return data_str.to_string();
+    }
+
+    let mut data: Value = match serde_json::from_str(data_str) {
+        Ok(v) => v,
+        Err(_) => return data_str.to_string(),
+    };
+
+    let is_tool_use = data
+        .get("content_block")
+        .and_then(|cb| cb.get("type"))
+        .and_then(|t| t.as_str()) == Some("tool_use");
+
+    if !is_tool_use {
+        return data_str.to_string();
+    }
+
+    let name_str = match data
+        .get("content_block")
+        .and_then(|cb| cb.get("name"))
+        .and_then(|n| n.as_str())
+    {
+        Some(s) => s.to_string(),
+        None => return data_str.to_string(),
+    };
+
+    for (original, override_name) in overrides {
+        if name_str == *override_name {
+            if let Some(cb) = data.get_mut("content_block") {
+                if let Some(name_field) = cb.get_mut("name") {
+                    *name_field = Value::String(original.clone());
+                }
+            }
+            return serde_json::to_string(&data).unwrap_or_else(|_| data_str.to_string());
+        }
+    }
+
+    data_str.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -343,5 +452,78 @@ mod tests {
         let assistant = msgs[0]["content"].as_array().unwrap();
         assert_eq!(assistant.len(), 1);
         assert_eq!(assistant[0]["id"].as_str().unwrap(), "tu2");
+    }
+
+    #[test]
+    fn apply_tool_name_overrides_renames_tools_array() {
+        let mut body = json!({
+            "tools": [
+                {"name": "mcp__fs__read", "description": "read a file"},
+                {"name": "other_tool"}
+            ]
+        });
+        let overrides = vec![("mcp__fs__read".to_string(), "read".to_string())];
+        apply_tool_name_overrides(&mut body, &overrides);
+        let tools = body["tools"].as_array().unwrap();
+        assert_eq!(tools[0]["name"].as_str().unwrap(), "read");
+        assert_eq!(tools[1]["name"].as_str().unwrap(), "other_tool");
+    }
+
+    #[test]
+    fn apply_tool_name_overrides_renames_tool_use_in_messages() {
+        let mut body = json!({
+            "messages": [
+                {"role": "assistant", "content": [
+                    {"type": "tool_use", "id": "t1", "name": "mcp__fs__read", "input": {}}
+                ]}
+            ]
+        });
+        let overrides = vec![("mcp__fs__read".to_string(), "read".to_string())];
+        apply_tool_name_overrides(&mut body, &overrides);
+        let name = body["messages"][0]["content"][0]["name"].as_str().unwrap();
+        assert_eq!(name, "read");
+    }
+
+    #[test]
+    fn apply_tool_name_overrides_no_op_when_empty() {
+        let mut body = json!({"tools": [{"name": "my_tool"}]});
+        let original = body.clone();
+        apply_tool_name_overrides(&mut body, &[]);
+        assert_eq!(body, original);
+    }
+
+    #[test]
+    fn reverse_tool_name_in_sse_event_reverses_name() {
+        let data = r#"{"index":0,"content_block":{"type":"tool_use","id":"tu1","name":"read","input":{}}}"#;
+        let overrides = vec![("mcp__fs__read".to_string(), "read".to_string())];
+        let result = reverse_tool_name_in_sse_event("content_block_start", data, &overrides);
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(
+            parsed["content_block"]["name"].as_str().unwrap(),
+            "mcp__fs__read"
+        );
+    }
+
+    #[test]
+    fn reverse_tool_name_in_sse_event_no_op_wrong_event_type() {
+        let data = r#"{"index":0,"content_block":{"type":"tool_use","id":"tu1","name":"read","input":{}}}"#;
+        let overrides = vec![("mcp__fs__read".to_string(), "read".to_string())];
+        let result = reverse_tool_name_in_sse_event("content_block_delta", data, &overrides);
+        assert_eq!(result, data);
+    }
+
+    #[test]
+    fn reverse_tool_name_in_sse_event_no_op_not_tool_use() {
+        let data = r#"{"index":0,"content_block":{"type":"text","text":"hello"}}"#;
+        let overrides = vec![("mcp__fs__read".to_string(), "read".to_string())];
+        let result = reverse_tool_name_in_sse_event("content_block_start", data, &overrides);
+        assert_eq!(result, data);
+    }
+
+    #[test]
+    fn reverse_tool_name_in_sse_event_no_op_empty_overrides() {
+        let data = r#"{"index":0,"content_block":{"type":"tool_use","id":"tu1","name":"read","input":{}}}"#;
+        let result = reverse_tool_name_in_sse_event("content_block_start", data, &[]);
+        assert_eq!(result, data);
     }
 }

@@ -355,7 +355,6 @@ async fn log_agent_request(
     agent_body: &Value,
     url_host: &str,
 ) -> Result<String, ()> {
-    let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
     let note = format!("webfetch agent ({})", url_host);
     let fields = extract_request_fields(agent_body, None).unwrap_or_default();
     let headers_json = headers_to_json(
@@ -370,7 +369,6 @@ async fn log_agent_request(
             session_id: ctx.session_id,
             method: "POST",
             path: ctx.stored_path,
-            timestamp: &timestamp,
             headers_json: headers_json.as_deref(),
             note: Some(&note),
         },

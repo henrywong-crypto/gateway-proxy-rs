@@ -44,7 +44,12 @@ fn build_detail_breadcrumbs(
     crumbs
 }
 
-pub fn render_request_detail_view(req: &ProxyRequest, session: &Session) -> String {
+pub fn render_request_detail_view(
+    req: &ProxyRequest,
+    session: &Session,
+    prev_id: Option<&str>,
+    next_id: Option<&str>,
+) -> String {
     let base = format!(
         "/_dashboard/sessions/{}/requests/{}",
         req.session_id, req.id
@@ -52,18 +57,29 @@ pub fn render_request_detail_view(req: &ProxyRequest, session: &Session) -> Stri
 
     let subpages = build_request_subpage_defs(req, &base, true);
 
+    let mut nav_links = vec![];
+    if let Some(id) = prev_id {
+        let href = format!("/_dashboard/sessions/{}/requests/{}", req.session_id, id);
+        nav_links.push(NavLink::new("← Newer", href));
+    }
+    if let Some(id) = next_id {
+        let href = format!("/_dashboard/sessions/{}/requests/{}", req.session_id, id);
+        nav_links.push(NavLink::new("Older →", href));
+    }
+    nav_links.push(NavLink::back());
+
     Page {
         title: format!(
             "Gateway Proxy - Session {} - Request #{}",
             session.name, req.id
         ),
         breadcrumbs: build_detail_breadcrumbs(session, req, None),
-        nav_links: vec![NavLink::back()],
+        nav_links,
         info_rows: vec![
             InfoRow::new("Method", &req.method),
             InfoRow::new("Path", &req.path),
             InfoRow::new("Model", req.model.as_deref().unwrap_or("")),
-            InfoRow::new("Time", &req.timestamp),
+            InfoRow::new("Time", req.created_at.get(11..19).unwrap_or(&req.created_at)),
         ],
         content: (),
         subpages,
@@ -92,6 +108,8 @@ pub fn render_request_detail_page_view(
     query: &HashMap<String, String>,
     filters: &[String],
     keep_tool_pairs: i64,
+    prev_id: Option<&str>,
+    next_id: Option<&str>,
 ) -> String {
     let page_label = get_page_label(page);
 
@@ -110,13 +128,24 @@ pub fn render_request_detail_page_view(
         {detail_page_content.content_view}
     };
 
+    let mut nav_links = vec![];
+    if let Some(id) = prev_id {
+        let href = format!("/_dashboard/sessions/{}/requests/{}", req.session_id, id);
+        nav_links.push(NavLink::new("← Newer", href));
+    }
+    if let Some(id) = next_id {
+        let href = format!("/_dashboard/sessions/{}/requests/{}", req.session_id, id);
+        nav_links.push(NavLink::new("Older →", href));
+    }
+    nav_links.push(NavLink::back());
+
     Page {
         title: format!(
             "Gateway Proxy - Session {} - Request #{} - {}",
             session.name, req.id, page_label
         ),
         breadcrumbs: build_detail_breadcrumbs(session, req, Some(page_label)),
-        nav_links: vec![NavLink::back()],
+        nav_links,
         info_rows: vec![],
         content,
         subpages: vec![],

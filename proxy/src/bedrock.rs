@@ -12,7 +12,7 @@ use crate::{
         actix_headers_iter, effective_client, extract_request_fields, get_session_or_error,
         headers_to_json, load_filters_for_profile, log_request, to_actix_status, RequestMeta,
     },
-    sse::parse_sse_events,
+    sse::{parse_sse_events, SseParser},
 };
 
 // --- AWS Event Stream binary protocol encoding ---
@@ -68,58 +68,6 @@ fn encode_bedrock_chunk(data_json: &str) -> Vec<u8> {
         ],
         payload.as_bytes(),
     )
-}
-
-// --- Incremental SSE parser ---
-
-struct SseParser {
-    buffer: String,
-    current_data: Vec<String>,
-}
-
-impl SseParser {
-    fn new() -> Self {
-        SseParser {
-            buffer: String::new(),
-            current_data: Vec::new(),
-        }
-    }
-
-    /// Feed a chunk of text and return completed event data strings.
-    fn feed(&mut self, chunk: &str) -> Vec<String> {
-        self.buffer.push_str(chunk);
-        let mut events = Vec::new();
-
-        while let Some(pos) = self.buffer.find('\n') {
-            let line = self.buffer[..pos].trim_end_matches('\r').to_string();
-            self.buffer = self.buffer[pos + 1..].to_string();
-
-            if line.is_empty() {
-                // Empty line = event boundary
-                if !self.current_data.is_empty() {
-                    events.push(self.current_data.join("\n"));
-                    self.current_data.clear();
-                }
-            } else if let Some(rest) = line.strip_prefix("data:") {
-                let data = rest.strip_prefix(' ').unwrap_or(rest);
-                self.current_data.push(data.to_string());
-            }
-            // Ignore event type, comment lines (starting with ':'), and unknown fields
-        }
-
-        events
-    }
-
-    /// Flush any remaining buffered event at end of stream.
-    fn flush(&mut self) -> Option<String> {
-        if self.current_data.is_empty() {
-            None
-        } else {
-            let data = self.current_data.join("\n");
-            self.current_data.clear();
-            Some(data)
-        }
-    }
 }
 
 /// Translate a Bedrock-style request body into an Anthropic API request.
@@ -239,7 +187,6 @@ async fn log_bedrock_request(
         return Err(ErrorBadRequest("Request body must be a JSON object"));
     }
 
-    let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
     let stored_path = format!("/model/{}/invoke-with-response-stream", model_id);
     let req_headers_json =
         headers_to_json(actix_headers_iter(req)).map_err(ErrorInternalServerError)?;
@@ -252,7 +199,6 @@ async fn log_bedrock_request(
             session_id,
             method: "POST",
             path: &stored_path,
-            timestamp: &timestamp,
             headers_json: Some(&req_headers_json),
             note: None,
         },
@@ -338,7 +284,7 @@ fn spawn_bedrock_stream_converter(
                     accumulated.extend_from_slice(&chunk);
 
                     let chunk_str = String::from_utf8_lossy(&chunk);
-                    for data in parser.feed(&chunk_str) {
+                    for (_event_type, data) in parser.feed(&chunk_str) {
                         let frame = encode_bedrock_chunk(&data);
                         if tx.unbounded_send(Ok(Bytes::from(frame))).is_err() {
                             return; // Client disconnected
@@ -355,7 +301,7 @@ fn spawn_bedrock_stream_converter(
             }
         }
 
-        if let Some(data) = parser.flush() {
+        if let Some((_event_type, data)) = parser.flush() {
             let frame = encode_bedrock_chunk(&data);
             let _ = tx.unbounded_send(Ok(Bytes::from(frame)));
         }
@@ -492,7 +438,10 @@ mod tests {
     fn sse_parser_single_event() {
         let mut parser = SseParser::new();
         let events = parser.feed("event: message_start\ndata: {\"type\":\"message_start\"}\n\n");
-        assert_eq!(events, vec!["{\"type\":\"message_start\"}"]);
+        assert_eq!(
+            events,
+            vec![("message_start".to_string(), "{\"type\":\"message_start\"}".to_string())]
+        );
     }
 
     #[test]
@@ -501,21 +450,33 @@ mod tests {
         let events1 = parser.feed("event: content\nda");
         assert!(events1.is_empty());
         let events2 = parser.feed("ta: hello world\n\n");
-        assert_eq!(events2, vec!["hello world"]);
+        assert_eq!(
+            events2,
+            vec![("content".to_string(), "hello world".to_string())]
+        );
     }
 
     #[test]
     fn sse_parser_multiple_events() {
         let mut parser = SseParser::new();
         let events = parser.feed("event: a\ndata: one\n\nevent: b\ndata: two\n\n");
-        assert_eq!(events, vec!["one", "two"]);
+        assert_eq!(
+            events,
+            vec![
+                ("a".to_string(), "one".to_string()),
+                ("b".to_string(), "two".to_string()),
+            ]
+        );
     }
 
     #[test]
     fn sse_parser_multiline_data() {
         let mut parser = SseParser::new();
         let events = parser.feed("event: msg\ndata: line1\ndata: line2\n\n");
-        assert_eq!(events, vec!["line1\nline2"]);
+        assert_eq!(
+            events,
+            vec![("msg".to_string(), "line1\nline2".to_string())]
+        );
     }
 
     #[test]
@@ -523,28 +484,34 @@ mod tests {
         let mut parser = SseParser::new();
         let events = parser.feed("event: last\ndata: final\n");
         assert!(events.is_empty());
-        assert_eq!(parser.flush(), Some("final".to_string()));
+        assert_eq!(
+            parser.flush(),
+            Some(("last".to_string(), "final".to_string()))
+        );
     }
 
     #[test]
     fn sse_parser_comments_ignored() {
         let mut parser = SseParser::new();
         let events = parser.feed(": this is a comment\nevent: ping\ndata: pong\n\n");
-        assert_eq!(events, vec!["pong"]);
+        assert_eq!(
+            events,
+            vec![("ping".to_string(), "pong".to_string())]
+        );
     }
 
     #[test]
     fn sse_parser_no_event_field() {
         let mut parser = SseParser::new();
         let events = parser.feed("data: just data\n\n");
-        assert_eq!(events, vec!["just data"]);
+        assert_eq!(events, vec![("".to_string(), "just data".to_string())]);
     }
 
     #[test]
     fn sse_parser_carriage_returns() {
         let mut parser = SseParser::new();
         let events = parser.feed("event: cr\r\ndata: value\r\n\r\n");
-        assert_eq!(events, vec!["value"]);
+        assert_eq!(events, vec![("cr".to_string(), "value".to_string())]);
     }
 
     // --- build_bedrock_error_response tests ---

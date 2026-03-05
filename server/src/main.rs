@@ -128,6 +128,30 @@ fn configure_routes(cfg: &mut web::ServiceConfig) {
             web::post().to(handlers::update_message_filters_post),
         )
         .route(
+            "/_dashboard/filters/{id}/tool-name-overrides",
+            web::get().to(handlers::show_tool_name_overrides_page),
+        )
+        .route(
+            "/_dashboard/filters/{id}/tool-name-overrides",
+            web::post().to(handlers::create_tool_name_override_post),
+        )
+        .route(
+            "/_dashboard/filters/{id}/tool-name-overrides/new",
+            web::get().to(handlers::show_new_tool_name_override_form),
+        )
+        .route(
+            "/_dashboard/filters/{id}/tool-name-overrides/{oid}/edit",
+            web::get().to(handlers::show_edit_tool_name_override_form),
+        )
+        .route(
+            "/_dashboard/filters/{id}/tool-name-overrides/{oid}/edit",
+            web::post().to(handlers::update_tool_name_override_post),
+        )
+        .route(
+            "/_dashboard/filters/{id}/tool-name-overrides/{oid}/delete",
+            web::post().to(handlers::delete_tool_name_override_post),
+        )
+        .route(
             "/_dashboard/sessions/{id}/requests",
             web::get().to(handlers::show_requests_page),
         )
@@ -188,10 +212,6 @@ fn configure_routes(cfg: &mut web::ServiceConfig) {
         .route(
             "/_dashboard/sessions/{id}/tool-intercept/webfetch/clear",
             web::post().to(handlers::clear_webfetch_intercept_post),
-        )
-        .route(
-            "/_dashboard/sessions/{id}/tool-intercept/webfetch/tool-names",
-            web::post().to(handlers::set_webfetch_tool_names_post),
         )
         .route(
             "/_dashboard/sessions/{id}/tool-intercept/webfetch/whitelist",

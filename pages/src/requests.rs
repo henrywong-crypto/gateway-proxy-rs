@@ -63,13 +63,14 @@ pub fn render_requests_view(
                         let (block_count, response_summary) = get_response_summary(&request);
                         let model = request.model.clone().unwrap_or_default();
                         let id_str = request.id.to_string();
+                        let time = request.created_at.get(11..19).unwrap_or(&request.created_at).to_string();
                         view! {
                             <tr>
                                 <td><a href={detail_href}>{id_str}</a></td>
                                 <td>{request.method}</td>
                                 <td>{request.path}</td>
                                 <td>{model}</td>
-                                <td>{request.timestamp}</td>
+                                <td>{time}</td>
                                 <td><a href={messages_href}>{msg_count}</a></td>
                                 <td>{preview}</td>
                                 <td><a href={sse_href}>{block_count}</a></td>

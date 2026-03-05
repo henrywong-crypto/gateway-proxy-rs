@@ -1,5 +1,5 @@
 use common::models::{
-    FilterProfile, SystemFilter, ToolFilter, DEFAULT_SYSTEM_FILTER_SUGGESTIONS,
+    FilterProfile, SystemFilter, ToolFilter, ToolNameOverride, DEFAULT_SYSTEM_FILTER_SUGGESTIONS,
     DEFAULT_TOOL_FILTER_SUGGESTIONS,
 };
 use leptos::{either::Either, prelude::*};
@@ -40,7 +40,7 @@ pub fn render_filters_view(profiles: &[FilterProfile]) -> String {
                             <tr>
                                 <td><a href={href}>{profile_id}</a></td>
                                 <td>{name_display}</td>
-                                <td>{profile.created_at.clone().unwrap_or_default()}</td>
+                                <td>{profile.created_at.clone()}</td>
                                 <td>
                                     {if !is_default {
                                         Either::Left(view! {
@@ -114,6 +114,7 @@ pub fn render_profile_view(
     system_count: i64,
     tool_count: i64,
     keep_tool_pairs: i64,
+    override_count: i64,
 ) -> String {
     let profile = profile.clone();
     let profile_name = profile.name.clone();
@@ -141,7 +142,7 @@ pub fn render_profile_view(
         info_rows: vec![
             InfoRow::new("Name", &profile.name),
             InfoRow::new("Default", if profile.is_default { "yes" } else { "no" }),
-            InfoRow::new("Created", &profile.created_at.unwrap_or_default()),
+            InfoRow::new("Created", &profile.created_at),
         ],
         content: (),
         subpages: vec![
@@ -159,6 +160,11 @@ pub fn render_profile_view(
                 "Message Filters",
                 format!("/_dashboard/filters/{}/messages", profile_id),
                 message_filter_label,
+            ),
+            Subpage::new(
+                "Tool Name Overrides",
+                format!("/_dashboard/filters/{}/tool-name-overrides", profile_id),
+                override_count,
             ),
         ],
     }
@@ -240,7 +246,7 @@ pub fn render_system_filters_view(
                             <tr>
                                 <td>{id_str}</td>
                                 <td>{filter.pattern}</td>
-                                <td>{filter.created_at.clone().unwrap_or_default()}</td>
+                                <td>{filter.created_at.clone()}</td>
                                 <td>
                                     <a href={edit_href}>"Edit"</a>
                                     " "
@@ -389,7 +395,7 @@ pub fn render_tool_filters_view(profile: &FilterProfile, tool_filters: &[ToolFil
                             <tr>
                                 <td>{id_str}</td>
                                 <td>{filter.name}</td>
-                                <td>{filter.created_at.clone().unwrap_or_default()}</td>
+                                <td>{filter.created_at.clone()}</td>
                                 <td>
                                     <a href={edit_href}>"Edit"</a>
                                     " "
@@ -589,6 +595,198 @@ pub fn render_edit_tool_filter_form(profile: &FilterProfile, filter: &ToolFilter
             Breadcrumb::link(
                 "Tool Filters",
                 format!("/_dashboard/filters/{}/tools", profile_id),
+            ),
+            Breadcrumb::current("Edit"),
+        ],
+        nav_links: vec![NavLink::back()],
+        content: form,
+        info_rows: vec![],
+        subpages: vec![],
+    }
+    .render()
+}
+
+pub fn render_tool_name_overrides_view(
+    profile: &FilterProfile,
+    overrides: &[ToolNameOverride],
+) -> String {
+    let profile_name = profile.name.clone();
+    let profile_id = profile.id.to_string();
+    let overrides = overrides.to_vec();
+    let total = overrides.len();
+    let empty = overrides.is_empty();
+
+    let content = view! {
+        <h2>"Tool Name Overrides"</h2>
+        <p>{format!("Total: {}", total)}</p>
+        {if empty {
+            Either::Left(view! {
+                <p>"No tool name overrides configured."</p>
+            })
+        } else {
+            Either::Right(view! {
+                <table>
+                    <tr>
+                        <th>"ID"</th>
+                        <th>"Original Name"</th>
+                        <th>"Override Name"</th>
+                        <th>"Created"</th>
+                        <th></th>
+                    </tr>
+                    {overrides.into_iter().map(|o| {
+                        let edit_href = format!(
+                            "/_dashboard/filters/{}/tool-name-overrides/{}/edit",
+                            profile_id, o.id
+                        );
+                        let delete_action = format!(
+                            "/_dashboard/filters/{}/tool-name-overrides/{}/delete",
+                            profile_id, o.id
+                        );
+                        let id_str = o.id.to_string();
+                        view! {
+                            <tr>
+                                <td>{id_str}</td>
+                                <td>{o.original_name}</td>
+                                <td>{o.override_name}</td>
+                                <td>{o.created_at.clone()}</td>
+                                <td>
+                                    <a href={edit_href}>"Edit"</a>
+                                    " "
+                                    <form method="POST" action={delete_action}>
+                                        <button type="submit">"Delete"</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        }
+                    }).collect::<Vec<_>>()}
+                </table>
+            })
+        }}
+    };
+
+    Page {
+        title: format!("Gateway Proxy - {} Tool Name Overrides", profile_name),
+        breadcrumbs: vec![
+            Breadcrumb::link("Home", "/_dashboard"),
+            Breadcrumb::link("Filters", "/_dashboard/filters"),
+            Breadcrumb::link(
+                format!("Profile {}", profile_name),
+                format!("/_dashboard/filters/{}", profile_id),
+            ),
+            Breadcrumb::current("Tool Name Overrides"),
+        ],
+        nav_links: vec![
+            NavLink::new(
+                "New Override",
+                format!(
+                    "/_dashboard/filters/{}/tool-name-overrides/new",
+                    profile_id
+                ),
+            ),
+            NavLink::back(),
+        ],
+        content,
+        info_rows: vec![],
+        subpages: vec![],
+    }
+    .render()
+}
+
+pub fn render_new_tool_name_override_form(profile: &FilterProfile) -> String {
+    let profile_name = profile.name.clone();
+    let profile_id = profile.id.to_string();
+    let form_action = format!(
+        "/_dashboard/filters/{}/tool-name-overrides",
+        profile_id
+    );
+
+    let form = view! {
+        <h2>"New Tool Name Override"</h2>
+        <form method="POST" action={form_action}>
+            <table>
+                <tr>
+                    <td><label>"Original Name"</label></td>
+                    <td><input type="text" name="original_name" required size="60"/></td>
+                </tr>
+                <tr>
+                    <td><label>"Override Name"</label></td>
+                    <td><input type="text" name="override_name" required size="60"/></td>
+                </tr>
+                <tr>
+                    <td></td>
+                    <td><input type="submit" value="Add Override"/></td>
+                </tr>
+            </table>
+        </form>
+    };
+
+    Page {
+        title: format!("Gateway Proxy - {} New Tool Name Override", profile_name),
+        breadcrumbs: vec![
+            Breadcrumb::link("Home", "/_dashboard"),
+            Breadcrumb::link("Filters", "/_dashboard/filters"),
+            Breadcrumb::link(
+                format!("Profile {}", profile_name),
+                format!("/_dashboard/filters/{}", profile_id),
+            ),
+            Breadcrumb::link(
+                "Tool Name Overrides",
+                format!("/_dashboard/filters/{}/tool-name-overrides", profile_id),
+            ),
+            Breadcrumb::current("New"),
+        ],
+        nav_links: vec![NavLink::back()],
+        content: form,
+        info_rows: vec![],
+        subpages: vec![],
+    }
+    .render()
+}
+
+pub fn render_edit_tool_name_override_form(
+    profile: &FilterProfile,
+    tool_name_override: &ToolNameOverride,
+) -> String {
+    let profile_name = profile.name.clone();
+    let profile_id = profile.id.to_string();
+    let override_id = tool_name_override.id.to_string();
+    let edit_action = format!(
+        "/_dashboard/filters/{}/tool-name-overrides/{}/edit",
+        profile_id, override_id
+    );
+
+    let form = view! {
+        <h2>"Edit Tool Name Override"</h2>
+        <form method="POST" action={edit_action}>
+            <table>
+                <tr>
+                    <td><label>"Original Name"</label></td>
+                    <td><input type="text" name="original_name" required value={tool_name_override.original_name.clone()} size="60"/></td>
+                </tr>
+                <tr>
+                    <td><label>"Override Name"</label></td>
+                    <td><input type="text" name="override_name" required value={tool_name_override.override_name.clone()} size="60"/></td>
+                </tr>
+                <tr>
+                    <td></td>
+                    <td><input type="submit" value="Save"/></td>
+                </tr>
+            </table>
+        </form>
+    };
+
+    Page {
+        title: "Gateway Proxy - Edit Tool Name Override".to_string(),
+        breadcrumbs: vec![
+            Breadcrumb::link("Home", "/_dashboard"),
+            Breadcrumb::link("Filters", "/_dashboard/filters"),
+            Breadcrumb::link(
+                format!("Profile {}", profile_name),
+                format!("/_dashboard/filters/{}", profile_id),
+            ),
+            Breadcrumb::link(
+                "Tool Name Overrides",
+                format!("/_dashboard/filters/{}/tool-name-overrides", profile_id),
             ),
             Breadcrumb::current("Edit"),
         ],

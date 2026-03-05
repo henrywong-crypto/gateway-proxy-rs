@@ -21,13 +21,7 @@ pub fn render_webfetch_view(session: &Session) -> String {
         session_id
     );
 
-    let tool_names_action = format!(
-        "/_dashboard/sessions/{}/tool-intercept/webfetch/tool-names",
-        session_id
-    );
-
     let wf_active = session.webfetch_intercept;
-    let tool_names_value = session.webfetch_tool_names.clone();
     let whitelist_value = session.webfetch_whitelist.clone().unwrap_or_default();
     let has_whitelist = session
         .webfetch_whitelist
@@ -59,21 +53,6 @@ pub fn render_webfetch_view(session: &Session) -> String {
                 </p>
             })
         }}
-
-        <h3>"Tool Names"</h3>
-        <p>"Tool names to intercept, one per line. These must match the tool names in the request exactly (e.g. " <code>"WebFetch"</code> ")."</p>
-        <form method="POST" action={tool_names_action}>
-            <table>
-                <tr>
-                    <td><label>"Names"</label></td>
-                    <td><textarea name="tool_names" rows="4" cols="60">{tool_names_value}</textarea></td>
-                </tr>
-                <tr>
-                    <td></td>
-                    <td><input type="submit" value="Save" /></td>
-                </tr>
-            </table>
-        </form>
 
         <h3>"Domain Whitelist"</h3>
         <p>"WebFetch calls to whitelisted domains are auto-accepted without manual approval. One domain per line. A domain like " <code>"github.com"</code> " matches " <code>"github.com"</code> " and any subdomain (e.g. " <code>"api.github.com"</code> ")."</p>

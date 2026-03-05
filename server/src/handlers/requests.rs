@@ -66,7 +66,20 @@ pub async fn show_request_detail_page(
         Err(e) => return HttpResponse::InternalServerError().body(format!("DB error: {}", e)),
     };
 
-    let html = pages::detail::render_request_detail_view(&request, &session);
+    let session_id_str = request.session_id.to_string();
+    let prev_id = db::get_prev_request_id(pool.get_ref(), &session_id_str, &request.created_at)
+        .await
+        .unwrap_or(None);
+    let next_id = db::get_next_request_id(pool.get_ref(), &session_id_str, &request.created_at)
+        .await
+        .unwrap_or(None);
+
+    let html = pages::detail::render_request_detail_view(
+        &request,
+        &session,
+        prev_id.as_deref(),
+        next_id.as_deref(),
+    );
     HttpResponse::Ok().content_type("text/html").body(html)
 }
 
@@ -116,6 +129,14 @@ pub async fn show_request_detail_subpage(
         0
     };
 
+    let session_id_str = request.session_id.to_string();
+    let prev_id = db::get_prev_request_id(pool.get_ref(), &session_id_str, &request.created_at)
+        .await
+        .unwrap_or(None);
+    let next_id = db::get_next_request_id(pool.get_ref(), &session_id_str, &request.created_at)
+        .await
+        .unwrap_or(None);
+
     let html = pages::detail::render_request_detail_page_view(
         &request,
         &session,
@@ -123,6 +144,8 @@ pub async fn show_request_detail_subpage(
         &query,
         &filters,
         keep_tool_pairs,
+        prev_id.as_deref(),
+        next_id.as_deref(),
     );
     HttpResponse::Ok().content_type("text/html").body(html)
 }

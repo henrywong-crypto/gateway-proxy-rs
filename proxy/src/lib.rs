@@ -8,7 +8,9 @@ use actix_web::{
     error::{ErrorBadGateway, ErrorBadRequest, ErrorInternalServerError},
     web, HttpRequest, HttpResponse,
 };
+use bytes::Bytes;
 use common::config::AppConfig;
+use futures::StreamExt;
 use shared::{
     actix_headers_iter, build_forward_headers, build_injected_sse_error, build_stored_path,
     build_target_url, effective_client, forward_response_headers, get_session_or_error,
@@ -21,8 +23,9 @@ async fn apply_request_filters(
     pool: &SqlitePool,
     profile_id: Option<&str>,
     body: &web::Bytes,
-) -> Vec<u8> {
+) -> (Vec<u8>, Vec<(String, String)>) {
     if let Some(filters) = load_filters_for_profile(pool, profile_id).await {
+        let tool_name_overrides = filters.tool_name_overrides.clone();
         if let Ok(mut json_body) = serde_json::from_slice::<serde_json::Value>(body) {
             filter::apply_filters(
                 &mut json_body,
@@ -30,23 +33,100 @@ async fn apply_request_filters(
                 &filters.tool_filters,
                 filters.keep_tool_pairs,
             );
-            return serde_json::to_vec(&json_body).unwrap_or_else(|_| body.to_vec());
+            filter::apply_tool_name_overrides(&mut json_body, &filters.tool_name_overrides);
+            return (
+                serde_json::to_vec(&json_body).unwrap_or_else(|_| body.to_vec()),
+                tool_name_overrides,
+            );
         }
+        return (body.to_vec(), tool_name_overrides);
     }
-    body.to_vec()
+    (body.to_vec(), vec![])
 }
 
 fn collect_webfetch_names(session: &common::models::Session) -> Vec<String> {
     if session.webfetch_intercept {
-        session
-            .webfetch_tool_names
-            .lines()
-            .map(|line| line.trim().to_string())
-            .filter(|line| !line.is_empty())
-            .collect()
+        vec!["WebFetch".to_string()]
     } else {
         vec![]
     }
+}
+
+/// Spawn a task that streams the upstream response through the SSE channel,
+/// applying tool name reversal on `content_block_start` events, and stores
+/// the accumulated body to DB when done.
+fn stream_proxy_response(
+    byte_stream: impl futures::Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
+    tx: futures::channel::mpsc::UnboundedSender<Result<Bytes, actix_web::Error>>,
+    overrides: Vec<(String, String)>,
+    pool: web::Data<SqlitePool>,
+    request_id: String,
+    resp_headers_json: String,
+    status: u16,
+) {
+    actix_web::rt::spawn(async move {
+        let mut accumulated: Vec<u8> = Vec::new();
+        let mut parser = sse::SseParser::new();
+        let mut byte_stream = std::pin::pin!(byte_stream);
+
+        while let Some(chunk_result) = byte_stream.next().await {
+            match chunk_result {
+                Ok(chunk) => {
+                    let chunk_str = String::from_utf8_lossy(&chunk);
+                    for (event_type, data_str) in parser.feed(&chunk_str) {
+                        let patched = filter::reverse_tool_name_in_sse_event(
+                            &event_type,
+                            &data_str,
+                            &overrides,
+                        );
+                        let wire = sse::serialize_sse_event(&event_type, &patched);
+                        accumulated.extend_from_slice(wire.as_bytes());
+                        if tx
+                            .unbounded_send(Ok(Bytes::from(wire.into_bytes())))
+                            .is_err()
+                        {
+                            return;
+                        }
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.unbounded_send(Err(actix_web::error::ErrorBadGateway(format!(
+                        "Upstream stream error: {}",
+                        e
+                    ))));
+                    return;
+                }
+            }
+        }
+
+        if let Some((event_type, data_str)) = parser.flush() {
+            let patched =
+                filter::reverse_tool_name_in_sse_event(&event_type, &data_str, &overrides);
+            let wire = sse::serialize_sse_event(&event_type, &patched);
+            accumulated.extend_from_slice(wire.as_bytes());
+            let _ = tx.unbounded_send(Ok(Bytes::from(wire.into_bytes())));
+        }
+
+        let store: anyhow::Result<()> = async {
+            let body_str = String::from_utf8_lossy(&accumulated);
+            let events = sse::parse_sse_events(&body_str);
+            let events_json = serde_json::to_string(&events)?;
+            db::set_request_response(
+                pool.get_ref(),
+                &request_id,
+                status as i64,
+                Some(&resp_headers_json),
+                Some(&body_str),
+                Some(&events_json),
+            )
+            .await?;
+            Ok(())
+        }
+        .await;
+        if let Err(e) = store {
+            log::error!("Failed to store streaming response: {}", e);
+        }
+    });
 }
 
 async fn store_webfetch_interception(
@@ -86,7 +166,7 @@ async fn store_webfetch_interception(
 mod tests {
     use super::*;
 
-    fn make_session(intercept: bool, tool_names: &str) -> common::models::Session {
+    fn make_session(intercept: bool) -> common::models::Session {
         common::models::Session {
             id: uuid::Uuid::nil(),
             name: "test".to_string(),
@@ -96,47 +176,29 @@ mod tests {
             x_api_key: None,
             profile_id: None,
             webfetch_intercept: intercept,
-            webfetch_tool_names: tool_names.to_string(),
             webfetch_whitelist: None,
             error_inject: None,
-            created_at: None,
+            created_at: String::new(),
+            updated_at: String::new(),
             request_count: 0,
         }
     }
 
     #[test]
     fn collect_webfetch_names_intercept_off() {
-        let session = make_session(false, "WebFetch\nWebSearch");
+        let session = make_session(false);
         assert!(collect_webfetch_names(&session).is_empty());
     }
 
     #[test]
     fn collect_webfetch_names_intercept_on() {
-        let session = make_session(true, "WebFetch\nWebSearch");
-        assert_eq!(
-            collect_webfetch_names(&session),
-            vec!["WebFetch", "WebSearch"]
-        );
-    }
-
-    #[test]
-    fn collect_webfetch_names_empty_lines_and_whitespace() {
-        let session = make_session(true, "  WebFetch  \n\n  WebSearch  \n\n");
-        assert_eq!(
-            collect_webfetch_names(&session),
-            vec!["WebFetch", "WebSearch"]
-        );
-    }
-
-    #[test]
-    fn collect_webfetch_names_empty_string() {
-        let session = make_session(true, "");
-        assert!(collect_webfetch_names(&session).is_empty());
+        let session = make_session(true);
+        assert_eq!(collect_webfetch_names(&session), vec!["WebFetch"]);
     }
 
     #[test]
     fn collect_webfetch_names_single_name() {
-        let session = make_session(true, "WebFetch");
+        let session = make_session(true);
         assert_eq!(collect_webfetch_names(&session), vec!["WebFetch"]);
     }
 }
@@ -170,7 +232,6 @@ pub async fn proxy_handler(
     let target_url = build_target_url(&session.target_url, full_path, query);
     let stored_path = build_stored_path(full_path, query);
     let method = req.method().to_string();
-    let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
 
     log::info!(
         "{} {} -> {} {}",
@@ -197,7 +258,6 @@ pub async fn proxy_handler(
             session_id,
             method: &method,
             path: &stored_path,
-            timestamp: &timestamp,
             headers_json: Some(&req_headers_json),
             note: note.as_deref(),
         },
@@ -207,7 +267,7 @@ pub async fn proxy_handler(
     .map_err(ErrorInternalServerError)?;
 
     // Apply filters to the body before forwarding
-    let forward_body =
+    let (forward_body, tool_name_overrides) =
         apply_request_filters(pool.get_ref(), session.profile_id.as_deref(), &body).await;
 
     // Forward the request upstream
@@ -249,6 +309,23 @@ pub async fn proxy_handler(
 
     let mut builder = HttpResponse::build(actix_status);
     forward_response_headers(&mut builder, upstream.headers());
+
+    // Streaming path: when tool name overrides are present and no webfetch interception needed.
+    // Webfetch interception requires the full buffered response, so those two are mutually exclusive.
+    if webfetch_context.is_none() && !tool_name_overrides.is_empty() {
+        let (tx, rx) =
+            futures::channel::mpsc::unbounded::<Result<Bytes, actix_web::Error>>();
+        stream_proxy_response(
+            upstream.bytes_stream(),
+            tx,
+            tool_name_overrides,
+            pool.clone(),
+            request_id,
+            resp_headers_json,
+            status,
+        );
+        return Ok(builder.streaming(rx));
+    }
 
     let response_body = upstream
         .bytes()

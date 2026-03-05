@@ -5,7 +5,7 @@ use sqlx::sqlite::SqlitePool;
 const SESSION_SELECT: &str = "\
     SELECT s.id, s.name, s.target_url, s.tls_verify_disabled, s.auth_header, \
     s.x_api_key, s.profile_id, s.error_inject, s.webfetch_intercept, \
-    s.webfetch_whitelist, s.webfetch_tool_names, s.created_at, \
+    s.webfetch_whitelist, s.created_at, s.updated_at, \
     COALESCE((SELECT COUNT(*) FROM requests r WHERE r.session_id = s.id), 0) as request_count \
     FROM sessions s";
 
@@ -115,19 +115,6 @@ pub async fn set_session_webfetch_whitelist(
 ) -> anyhow::Result<()> {
     sqlx::query("UPDATE sessions SET webfetch_whitelist = ? WHERE id = ?")
         .bind(whitelist)
-        .bind(session_id)
-        .execute(pool)
-        .await?;
-    Ok(())
-}
-
-pub async fn set_session_webfetch_tool_names(
-    pool: &SqlitePool,
-    session_id: &str,
-    tool_names: &str,
-) -> anyhow::Result<()> {
-    sqlx::query("UPDATE sessions SET webfetch_tool_names = ? WHERE id = ?")
-        .bind(tool_names)
         .bind(session_id)
         .execute(pool)
         .await?;

@@ -273,7 +273,7 @@ pub fn render_detail_page_content(
                 "Show truncated"
             };
             controls_view = view! {
-                <a href={toggle_href}>{toggle_label}</a>
+                <p><a href={toggle_href}>{toggle_label}</a></p>
             }
             .into_any();
             let json = json.to_string();

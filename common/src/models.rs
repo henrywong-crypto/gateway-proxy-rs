@@ -13,8 +13,8 @@ pub struct Session {
     pub error_inject: Option<String>,
     pub webfetch_intercept: bool,
     pub webfetch_whitelist: Option<String>,
-    pub webfetch_tool_names: String,
-    pub created_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
     #[sqlx(default)]
     pub request_count: i64,
 }
@@ -27,7 +27,6 @@ pub struct ProxyRequest {
     pub session_id: uuid::Uuid,
     pub method: String,
     pub path: String,
-    pub timestamp: String,
     pub headers_json: Option<String>,
     pub body_json: Option<String>,
     pub truncated_json: Option<String>,
@@ -37,7 +36,8 @@ pub struct ProxyRequest {
     pub system_json: Option<String>,
     pub params_json: Option<String>,
     pub note: Option<String>,
-    pub created_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
     pub response_status: Option<i64>,
     pub response_headers_json: Option<String>,
     pub response_body: Option<String>,
@@ -54,7 +54,8 @@ pub struct FilterProfile {
     pub id: uuid::Uuid,
     pub name: String,
     pub is_default: bool,
-    pub created_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -64,7 +65,8 @@ pub struct SystemFilter {
     #[sqlx(try_from = "String")]
     pub profile_id: uuid::Uuid,
     pub pattern: String,
-    pub created_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -74,14 +76,31 @@ pub struct ToolFilter {
     #[sqlx(try_from = "String")]
     pub profile_id: uuid::Uuid,
     pub name: String,
-    pub created_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct ToolNameOverride {
+    #[sqlx(try_from = "String")]
+    pub id: uuid::Uuid,
+    #[sqlx(try_from = "String")]
+    pub profile_id: uuid::Uuid,
+    pub original_name: String,
+    pub override_name: String,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct MessageFilter {
     #[sqlx(try_from = "String")]
+    pub id: uuid::Uuid,
+    #[sqlx(try_from = "String")]
     pub profile_id: uuid::Uuid,
     pub keep_tool_pairs: i64,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone)]

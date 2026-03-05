@@ -1,9 +1,9 @@
-use common::models::{FilterProfile, SystemFilter, ToolFilter};
+use common::models::{FilterProfile, SystemFilter, ToolFilter, ToolNameOverride};
 use sqlx::sqlite::SqlitePool;
 
-const PROFILE_COLUMNS: &str = "id, name, is_default, created_at";
-const SYSTEM_FILTER_COLUMNS: &str = "id, profile_id, pattern, created_at";
-const TOOL_FILTER_COLUMNS: &str = "id, profile_id, name, created_at";
+const PROFILE_COLUMNS: &str = "id, name, is_default, created_at, updated_at";
+const SYSTEM_FILTER_COLUMNS: &str = "id, profile_id, pattern, created_at, updated_at";
+const TOOL_FILTER_COLUMNS: &str = "id, profile_id, name, created_at, updated_at";
 
 // -- Filter Profiles --
 
@@ -115,9 +115,11 @@ pub async fn get_setting(pool: &SqlitePool, key: &str) -> anyhow::Result<Option<
 }
 
 pub async fn set_setting(pool: &SqlitePool, key: &str, value: &str) -> anyhow::Result<()> {
+    let id = uuid::Uuid::new_v4().to_string();
     sqlx::query(
-        "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "INSERT INTO settings (id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
     )
+    .bind(id)
     .bind(key)
     .bind(value)
     .execute(pool)
@@ -275,6 +277,93 @@ pub async fn update_tool_filter(pool: &SqlitePool, id: &str, name: &str) -> anyh
 
 pub use common::models::DEFAULT_TOOL_FILTER_SUGGESTIONS;
 
+// -- Tool Name Overrides --
+
+const TOOL_NAME_OVERRIDE_COLUMNS: &str =
+    "id, profile_id, original_name, override_name, created_at, updated_at";
+
+pub async fn count_tool_name_overrides(
+    pool: &SqlitePool,
+    profile_id: &str,
+) -> anyhow::Result<i64> {
+    let row: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM tool_name_overrides WHERE profile_id = ?")
+            .bind(profile_id)
+            .fetch_one(pool)
+            .await?;
+    Ok(row.0)
+}
+
+pub async fn list_tool_name_overrides(
+    pool: &SqlitePool,
+    profile_id: &str,
+) -> anyhow::Result<Vec<ToolNameOverride>> {
+    Ok(sqlx::query_as::<_, ToolNameOverride>(&format!(
+        "SELECT {} FROM tool_name_overrides WHERE profile_id = ? ORDER BY created_at DESC",
+        TOOL_NAME_OVERRIDE_COLUMNS
+    ))
+    .bind(profile_id)
+    .fetch_all(pool)
+    .await?)
+}
+
+pub async fn get_tool_name_override(
+    pool: &SqlitePool,
+    id: &str,
+) -> anyhow::Result<Option<ToolNameOverride>> {
+    Ok(sqlx::query_as::<_, ToolNameOverride>(&format!(
+        "SELECT {} FROM tool_name_overrides WHERE id = ?",
+        TOOL_NAME_OVERRIDE_COLUMNS
+    ))
+    .bind(id)
+    .fetch_optional(pool)
+    .await?)
+}
+
+pub async fn create_tool_name_override(
+    pool: &SqlitePool,
+    profile_id: &str,
+    original_name: &str,
+    override_name: &str,
+) -> anyhow::Result<()> {
+    let id = uuid::Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO tool_name_overrides (id, profile_id, original_name, override_name) VALUES (?, ?, ?, ?)",
+    )
+    .bind(&id)
+    .bind(profile_id)
+    .bind(original_name)
+    .bind(override_name)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn update_tool_name_override(
+    pool: &SqlitePool,
+    id: &str,
+    original_name: &str,
+    override_name: &str,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        "UPDATE tool_name_overrides SET original_name = ?, override_name = ? WHERE id = ?",
+    )
+    .bind(original_name)
+    .bind(override_name)
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn delete_tool_name_override(pool: &SqlitePool, id: &str) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM tool_name_overrides WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 // -- Message Filters --
 
 pub async fn get_filter_profile_keep_tool_pairs(
@@ -294,9 +383,11 @@ pub async fn set_filter_profile_message_filter(
     profile_id: &str,
     keep_tool_pairs: i64,
 ) -> anyhow::Result<()> {
+    let id = uuid::Uuid::new_v4().to_string();
     sqlx::query(
-        "INSERT INTO message_filters (profile_id, keep_tool_pairs) VALUES (?, ?) ON CONFLICT(profile_id) DO UPDATE SET keep_tool_pairs = excluded.keep_tool_pairs",
+        "INSERT INTO message_filters (id, profile_id, keep_tool_pairs) VALUES (?, ?, ?) ON CONFLICT(profile_id) DO UPDATE SET keep_tool_pairs = excluded.keep_tool_pairs",
     )
+    .bind(id)
     .bind(profile_id)
     .bind(keep_tool_pairs)
     .execute(pool)

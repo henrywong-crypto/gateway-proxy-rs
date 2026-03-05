@@ -3,9 +3,9 @@ use sqlx::sqlite::SqlitePool;
 
 /// All columns for the `requests` table, used in SELECT queries.
 const REQUEST_COLUMNS: &str = "\
-    id, session_id, method, path, timestamp, headers_json, body_json, \
+    id, session_id, method, path, headers_json, body_json, \
     truncated_json, model, tools_json, messages_json, system_json, params_json, \
-    note, created_at, response_status, response_headers_json, response_body, \
+    note, created_at, updated_at, response_status, response_headers_json, response_body, \
     response_events_json, webfetch_first_response_body, webfetch_first_response_events_json, \
     webfetch_followup_body_json, webfetch_rounds_json";
 
@@ -13,7 +13,6 @@ pub struct CreateRequestParams<'a> {
     pub session_id: &'a str,
     pub method: &'a str,
     pub path: &'a str,
-    pub timestamp: &'a str,
     pub headers_json: Option<&'a str>,
     pub body_json: Option<&'a str>,
     pub truncated_json: Option<&'a str>,
@@ -83,15 +82,14 @@ pub async fn create_request(
 ) -> anyhow::Result<String> {
     let id = uuid::Uuid::new_v4().to_string();
     sqlx::query(
-        "INSERT INTO requests (id, session_id, method, path, timestamp, headers_json, body_json, \
+        "INSERT INTO requests (id, session_id, method, path, headers_json, body_json, \
          truncated_json, model, tools_json, messages_json, system_json, params_json, note) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(params.session_id)
     .bind(params.method)
     .bind(params.path)
-    .bind(params.timestamp)
     .bind(params.headers_json)
     .bind(params.body_json)
     .bind(params.truncated_json)
@@ -147,6 +145,36 @@ pub async fn set_request_note(
         .execute(pool)
         .await?;
     Ok(())
+}
+
+pub async fn get_prev_request_id(
+    pool: &SqlitePool,
+    session_id: &str,
+    created_at: &str,
+) -> anyhow::Result<Option<String>> {
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT id FROM requests WHERE session_id = ? AND created_at > ? ORDER BY created_at ASC LIMIT 1",
+    )
+    .bind(session_id)
+    .bind(created_at)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|row| row.0))
+}
+
+pub async fn get_next_request_id(
+    pool: &SqlitePool,
+    session_id: &str,
+    created_at: &str,
+) -> anyhow::Result<Option<String>> {
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT id FROM requests WHERE session_id = ? AND created_at < ? ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(session_id)
+    .bind(created_at)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|row| row.0))
 }
 
 pub async fn set_request_webfetch_data(

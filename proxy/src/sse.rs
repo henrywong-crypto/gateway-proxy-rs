@@ -1,3 +1,72 @@
+pub struct SseParser {
+    buffer: String,
+    current_event_type: String,
+    current_data: Vec<String>,
+}
+
+impl SseParser {
+    pub fn new() -> Self {
+        SseParser {
+            buffer: String::new(),
+            current_event_type: String::new(),
+            current_data: Vec::new(),
+        }
+    }
+
+    /// Feed a chunk of text and return completed `(event_type, data_str)` pairs.
+    /// `event_type` is `""` when absent.
+    pub fn feed(&mut self, chunk: &str) -> Vec<(String, String)> {
+        self.buffer.push_str(chunk);
+        let mut events = Vec::new();
+
+        while let Some(pos) = self.buffer.find('\n') {
+            let line = self.buffer[..pos].trim_end_matches('\r').to_string();
+            self.buffer = self.buffer[pos + 1..].to_string();
+
+            if line.is_empty() {
+                if !self.current_data.is_empty() {
+                    events.push((
+                        self.current_event_type.clone(),
+                        self.current_data.join("\n"),
+                    ));
+                    self.current_data.clear();
+                    self.current_event_type.clear();
+                }
+            } else if let Some(rest) = line.strip_prefix("event:") {
+                self.current_event_type =
+                    rest.strip_prefix(' ').unwrap_or(rest).to_string();
+            } else if let Some(rest) = line.strip_prefix("data:") {
+                let data = rest.strip_prefix(' ').unwrap_or(rest);
+                self.current_data.push(data.to_string());
+            }
+        }
+
+        events
+    }
+
+    /// Flush any remaining buffered event at end of stream.
+    pub fn flush(&mut self) -> Option<(String, String)> {
+        if self.current_data.is_empty() {
+            None
+        } else {
+            let event_type = self.current_event_type.clone();
+            let data = self.current_data.join("\n");
+            self.current_data.clear();
+            self.current_event_type.clear();
+            Some((event_type, data))
+        }
+    }
+}
+
+/// Re-serialise a parsed event back to SSE wire format.
+pub fn serialize_sse_event(event_type: &str, data_str: &str) -> String {
+    if event_type.is_empty() {
+        format!("data: {}\n\n", data_str)
+    } else {
+        format!("event: {}\ndata: {}\n\n", event_type, data_str)
+    }
+}
+
 pub fn parse_sse_events(body: &str) -> Vec<serde_json::Value> {
     let mut events = Vec::new();
     let mut current_event_type = String::new();

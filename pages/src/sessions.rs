@@ -40,7 +40,7 @@ pub fn render_sessions_view(sessions: &[Session], pagination: &Pagination) -> St
                                 <td>{session.name}</td>
                                 <td>{session.target_url}</td>
                                 <td>{session.request_count}</td>
-                                <td>{session.created_at.clone().unwrap_or_default()}</td>
+                                <td>{session.created_at.clone()}</td>
                                 <td>
                                     <form method="POST" action={clear_action}>
                                         <button type="submit">"Clear"</button>
@@ -86,7 +86,7 @@ pub fn render_new_session_form(profiles: &[FilterProfile], default_profile_id: &
             <table>
                 <tr>
                     <td><label>"Name"</label></td>
-                    <td><input type="text" name="name" required/></td>
+                    <td><input type="text" name="name" required size="60"/></td>
                 </tr>
                 <tr>
                     <td><label>"Target URL"</label></td>
@@ -167,7 +167,7 @@ pub fn render_edit_session_form(
             <table>
                 <tr>
                     <td><label>"Name"</label></td>
-                    <td><input type="text" name="name" required value={session.name}/></td>
+                    <td><input type="text" name="name" required value={session.name} size="60"/></td>
                 </tr>
                 <tr>
                     <td><label>"Target URL"</label></td>

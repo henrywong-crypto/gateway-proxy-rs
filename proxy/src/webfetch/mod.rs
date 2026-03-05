@@ -138,7 +138,6 @@ struct FollowupRoundContext<'a> {
 /// Log a follow-up request/response round to the database.
 /// Returns the request ID if logging succeeded.
 async fn log_followup_round(ctx: &FollowupRoundContext<'_>) -> Option<String> {
-    let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
     let note = format!("webfetch follow-up (round {})", ctx.round_idx + 1);
     let fields = extract_request_fields(ctx.followup_body, None).unwrap_or_default();
     let headers_json = headers_to_json(
@@ -153,7 +152,6 @@ async fn log_followup_round(ctx: &FollowupRoundContext<'_>) -> Option<String> {
             session_id: ctx.session_id,
             method: "POST",
             path: ctx.stored_path,
-            timestamp: &timestamp,
             headers_json: headers_json.as_deref(),
             note: Some(&note),
         },

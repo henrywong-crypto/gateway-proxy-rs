@@ -16,6 +16,7 @@ pub struct ActiveFilters {
     pub system_filters: Vec<String>,
     pub tool_filters: Vec<String>,
     pub keep_tool_pairs: i64,
+    pub tool_name_overrides: Vec<(String, String)>,
 }
 
 /// Load filters for the given profile. Returns None if profile_id is empty/None.
@@ -39,10 +40,17 @@ pub async fn load_filters_for_profile(
     let keep_tool_pairs = db::get_filter_profile_keep_tool_pairs(pool, profile_id)
         .await
         .unwrap_or(0);
+    let tool_name_overrides: Vec<(String, String)> = db::list_tool_name_overrides(pool, profile_id)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|o| (o.original_name, o.override_name))
+        .collect();
     Some(ActiveFilters {
         system_filters,
         tool_filters,
         keep_tool_pairs,
+        tool_name_overrides,
     })
 }
 
@@ -140,7 +148,6 @@ pub struct RequestMeta<'a> {
     pub session_id: &'a str,
     pub method: &'a str,
     pub path: &'a str,
-    pub timestamp: &'a str,
     pub headers_json: Option<&'a str>,
     pub note: Option<&'a str>,
 }
@@ -156,7 +163,6 @@ pub async fn log_request(
             session_id: meta.session_id,
             method: meta.method,
             path: meta.path,
-            timestamp: meta.timestamp,
             headers_json: meta.headers_json,
             body_json: fields.body_json.as_deref(),
             truncated_json: fields.truncated_json.as_deref(),
